@@ -32,6 +32,33 @@ const caseData = computed(() => {
   return getCaseById(caseId)
 })
 
+const currentSaveRisk = computed(() => {
+  if (!gameStore.currentCase) return null
+  return saveStore.getCurrentSaveRisk()
+})
+
+function getRiskLabel(level: string): string {
+  const labels: Record<string, string> = {
+    safe: '安全',
+    caution: '注意',
+    danger: '危险',
+    critical: '危急',
+    corrupted: '侵蚀'
+  }
+  return labels[level] || '未知'
+}
+
+function getRiskColor(level: string): string {
+  const colors: Record<string, string> = {
+    safe: '#4caf50',
+    caution: '#ffc107',
+    danger: '#ff9800',
+    critical: '#f44336',
+    corrupted: '#9c27b0'
+  }
+  return colors[level] || '#888'
+}
+
 const intelligenceCompleteness = computed(() => {
   return gameStore.deductionInfoCompleteness
 })
@@ -337,7 +364,7 @@ function makeDeduction() {
     )
 
     const saveName = `[结算] ${caseData.value.title} - ${new Date().toLocaleString('zh-CN')}`
-    saveStore.createSave(saveName)
+    saveStore.createSave(saveName, true)
   }
 
   showResult.value = true
@@ -360,9 +387,69 @@ function goToClues() {
 }
 
 function saveProgress() {
+  const risk = saveStore.getCurrentSaveRisk()
+  
+  if (risk.level === 'safe' || risk.level === 'caution') {
+    doSaveProgress(false)
+    return
+  }
+  
+  const riskLabels: Record<string, string> = {
+    safe: '安全',
+    caution: '注意',
+    danger: '危险',
+    critical: '危急',
+    corrupted: '侵蚀'
+  }
+  const riskDescriptions: Record<string, string> = {
+    safe: '精神状态稳定，可以安全存档。',
+    caution: '轻微不安，存档过程可能伴随轻微幻觉。',
+    danger: '精神压力较大，存档可能出现数据偏差。',
+    critical: '濒临崩溃，存档有较大概率损坏！',
+    corrupted: '深渊凝视着你……强行存档可能造成不可逆的精神侵蚀。'
+  }
+  
+  const riskLabel = riskLabels[risk.level] || '未知'
+  const riskDesc = riskDescriptions[risk.level] || ''
+  
+  let confirmMsg = `⚠️ 存档风险等级：${riskLabel}\n\n${riskDesc}\n\n`
+  
+  if (risk.corruptionChance > 0) {
+    confirmMsg += `• 数据损坏概率：${Math.round(risk.corruptionChance * 100)}%\n`
+  }
+  if (risk.hallucinationChance > 0) {
+    confirmMsg += `• 幻觉信息注入概率：${Math.round(risk.hallucinationChance * 100)}%\n`
+  }
+  if (risk.sanityLossOnLoad > 0) {
+    confirmMsg += `• 读取时理智损失：-${risk.sanityLossOnLoad}\n`
+  }
+  if (risk.pollutionGain > 0) {
+    confirmMsg += `• 存档过程额外侵蚀：+${risk.pollutionGain}\n`
+  }
+  
+  if (risk.level === 'critical' || risk.level === 'corrupted') {
+    confirmMsg += `\n【警告】高污染状态下存档可能导致严重后果！\n\n是否仍然强制存档？`
+  } else {
+    confirmMsg += `\n是否继续存档？`
+  }
+  
+  if (confirm(confirmMsg)) {
+    doSaveProgress(true)
+  }
+}
+
+function doSaveProgress(forceSave: boolean) {
   const saveName = `案件进度 - ${new Date().toLocaleString('zh-CN')}`
-  if (saveStore.createSave(saveName)) {
-    alert('存档成功！')
+  const result = saveStore.createSave(saveName, forceSave)
+  
+  if (result.success) {
+    let msg = '存档成功！'
+    if (result.corrupted) {
+      msg += '\n\n⚠️ 注意：此存档已受到精神污染影响，数据可能不完全可靠。'
+    }
+    alert(msg)
+  } else {
+    alert('存档创建失败。')
   }
 }
 
@@ -415,8 +502,25 @@ function disproveOption(optionId: string) {
           <button class="action-btn" @click="goToClues">
             <span>🧩</span> 线索拼接
           </button>
-          <button class="action-btn" @click="saveProgress">
-            <span>💾</span> 保存进度
+          <button 
+            class="action-btn save-btn"
+            :class="{ 
+              'risk-caution': currentSaveRisk?.level === 'caution',
+              'risk-danger': currentSaveRisk?.level === 'danger',
+              'risk-critical': currentSaveRisk?.level === 'critical',
+              'risk-corrupted': currentSaveRisk?.level === 'corrupted'
+            }"
+            @click="saveProgress"
+          >
+            <span>💾</span> 
+            <span>保存进度</span>
+            <span 
+              v-if="currentSaveRisk && currentSaveRisk.level !== 'safe'" 
+              class="risk-badge"
+              :style="{ backgroundColor: getRiskColor(currentSaveRisk.level) }"
+            >
+              {{ getRiskLabel(currentSaveRisk.level) }}
+            </span>
           </button>
         </div>
       </div>
@@ -1842,6 +1946,58 @@ function disproveOption(optionId: string) {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.save-btn {
+  position: relative;
+}
+
+.risk-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.save-btn.risk-caution {
+  border-color: #ffc107;
+  box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+}
+
+.save-btn.risk-danger {
+  border-color: #ff9800;
+  box-shadow: 0 0 12px rgba(255, 152, 0, 0.4);
+}
+
+.save-btn.risk-critical {
+  border-color: #f44336;
+  box-shadow: 0 0 15px rgba(244, 67, 54, 0.5);
+  animation: critical-pulse 1.5s infinite;
+}
+
+.save-btn.risk-corrupted {
+  border-color: #9c27b0;
+  box-shadow: 0 0 20px rgba(156, 39, 176, 0.6);
+  animation: corrupted-pulse 2s infinite;
+}
+
+@keyframes critical-pulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(244, 67, 54, 0.5); }
+  50% { box-shadow: 0 0 25px rgba(244, 67, 54, 0.8); }
+}
+
+@keyframes corrupted-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 20px rgba(156, 39, 176, 0.6);
+    filter: hue-rotate(0deg);
+  }
+  50% { 
+    box-shadow: 0 0 30px rgba(156, 39, 176, 0.9);
+    filter: hue-rotate(20deg);
+  }
 }
 
 @media (max-width: 1024px) {

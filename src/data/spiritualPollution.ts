@@ -187,7 +187,9 @@ export function assessSaveRisk(state: SpiritualPollutionState, sanity: number, m
   let level: SaveRiskLevel = 'safe'
   let corruptionChance = 0
   let dataLossChance = 0
-  let hallucinationInjectionChance = 0
+  let hallucinationChance = 0
+  let sanityLossOnLoad = 0
+  let pollutionGain = 0
   let warningMessage = '存档稳定，可以安全保存。'
 
   const riskScore = erosionRatio * 60 + (state.shortTermShock / state.maxShortTermShock) * 25 + (1 - sanityRatio) * 15
@@ -196,44 +198,58 @@ export function assessSaveRisk(state: SpiritualPollutionState, sanity: number, m
     level = 'safe'
     corruptionChance = 0
     dataLossChance = 0
-    hallucinationInjectionChance = 0
+    hallucinationChance = 0
+    sanityLossOnLoad = 0
+    pollutionGain = 0
     warningMessage = '精神状态稳定，存档安全。'
   } else if (riskScore < 35) {
     level = 'caution'
     corruptionChance = 5
     dataLossChance = 0
-    hallucinationInjectionChance = 8
+    hallucinationChance = 8
+    sanityLossOnLoad = 2
+    pollutionGain = 1
     warningMessage = '你感到一丝不安...存档时请小心。'
   } else if (riskScore < 55) {
     level = 'danger'
     corruptionChance = 15
     dataLossChance = 3
-    hallucinationInjectionChance = 20
+    hallucinationChance = 20
+    sanityLossOnLoad = 5
+    pollutionGain = 3
     warningMessage = '⚠️ 精神波动剧烈，存档可能受到干扰！'
   } else if (riskScore < 80) {
     level = 'critical'
     corruptionChance = 30
     dataLossChance = 10
-    hallucinationInjectionChance = 40
+    hallucinationChance = 40
+    sanityLossOnLoad = 10
+    pollutionGain = 6
     warningMessage = '🚨 深渊正在凝视你！强烈建议恢复精神后再存档！'
   } else {
     level = 'corrupted'
     corruptionChance = 50
     dataLossChance = 25
-    hallucinationInjectionChance = 60
+    hallucinationChance = 60
+    sanityLossOnLoad = 18
+    pollutionGain = 12
     warningMessage = '💀 你的心智已濒临崩溃。此存档可能...无法保证原样读回。'
   }
 
   if (totalPollution > 150) {
     corruptionChance = Math.min(80, corruptionChance + 20)
     dataLossChance = Math.min(50, dataLossChance + 15)
+    sanityLossOnLoad = Math.min(25, sanityLossOnLoad + 5)
+    pollutionGain = Math.min(20, pollutionGain + 5)
   }
 
   return {
     level,
-    corruptionChance: Math.round(corruptionChance),
-    dataLossChance: Math.round(dataLossChance),
-    hallucinationInjectionChance: Math.round(hallucinationInjectionChance),
+    corruptionChance: Math.round(corruptionChance) / 100,
+    dataLossChance: Math.round(dataLossChance) / 100,
+    hallucinationChance: Math.round(hallucinationChance) / 100,
+    sanityLossOnLoad: Math.round(sanityLossOnLoad),
+    pollutionGain: Math.round(pollutionGain),
     warningMessage
   }
 }

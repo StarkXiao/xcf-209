@@ -62,7 +62,9 @@ export const useSaveStore = defineStore('save', () => {
         level: 'safe',
         corruptionChance: 0,
         dataLossChance: 0,
-        hallucinationInjectionChance: 0,
+        hallucinationChance: 0,
+        sanityLossOnLoad: 0,
+        pollutionGain: 0,
         warningMessage: '没有进行中的案件。'
       }
     }
@@ -154,7 +156,7 @@ export const useSaveStore = defineStore('save', () => {
     let finalGameState = currentGameState
     let corrupted = false
 
-    const corruptionRoll = Math.random() * 100
+    const corruptionRoll = Math.random()
     if (corruptionRoll < risk.corruptionChance) {
       corrupted = true
       const severity = corruptionRoll < risk.corruptionChance * 0.2 ? 'severe' :
@@ -163,8 +165,8 @@ export const useSaveStore = defineStore('save', () => {
       gameStore.addLog('sanity_loss', `⚠️ 存档仪式受到干扰...（${severity === 'severe' ? '严重' : severity === 'moderate' ? '中等' : '轻微'}污染）`)
     }
 
-    const hallucinationRoll = Math.random() * 100
-    if (hallucinationRoll < risk.hallucinationInjectionChance) {
+    const hallucinationRoll = Math.random()
+    if (hallucinationRoll < risk.hallucinationChance) {
       const messages = [
         '存档画面中似乎闪过了一个扭曲的影子...',
         '保存的瞬间，你听到了远处传来的低语...',
@@ -173,6 +175,10 @@ export const useSaveStore = defineStore('save', () => {
         '你确定刚才真的按下了保存键吗？'
       ]
       gameStore.addLog('sanity_loss', `👁️ ${messages[Math.floor(Math.random() * messages.length)]}`)
+    }
+
+    if (risk.pollutionGain > 0 && forceSave) {
+      gameStore.addPollution(0, risk.pollutionGain, 'save_ritual', '强行进行存档仪式带来的精神侵蚀')
     }
 
     if (saves.value.length >= maxSaves) {

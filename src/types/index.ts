@@ -926,7 +926,9 @@ export interface SaveRiskAssessment {
   level: SaveRiskLevel
   corruptionChance: number
   dataLossChance: number
-  hallucinationInjectionChance: number
+  hallucinationChance: number
+  sanityLossOnLoad: number
+  pollutionGain: number
   warningMessage: string
 }
 

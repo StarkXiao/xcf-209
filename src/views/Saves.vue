@@ -19,14 +19,33 @@ const sortedSaves = computed(() => {
   return [...saves.value].sort((a, b) => b.updatedAt - a.updatedAt)
 })
 
+const currentSaveRisk = computed(() => {
+  if (!gameStore.currentCase) return null
+  return saveStore.getCurrentSaveRisk()
+})
+
+const canCreateSave = computed(() => {
+  return gameStore.currentCase !== null
+})
+
 const globalToolNames = computed(() => {
   return saveStore.globalUnlockedTools
     .map(id => getToolById(id)?.name || id)
 })
 
 function loadSaveData(saveId: string) {
+  const save = saves.value.find(s => s.id === saveId)
+  if (!save) return
+
   if (gameStore.currentCase) {
     if (!confirm('当前有未保存的游戏进度，加载存档将丢失当前进度。确定要加载吗？')) {
+      return
+    }
+  }
+
+  const pollution = save.gameState.spiritualPollution
+  if (pollution && (pollution.longTermErosion > 50 || save.name.includes('[污染]'))) {
+    if (!confirm(`⚠️ 此存档受到精神污染影响（侵蚀：${pollution.longTermErosion}）。\n\n加载此存档可能会对您的调查员造成理智冲击。\n\n是否继续加载？`)) {
       return
     }
   }
@@ -67,12 +86,82 @@ function getInheritedToolNames(save: typeof saves.value[0]): string[] {
     .map(t => t.name)
 }
 
+function getRiskLabel(level: string): string {
+  const labels: Record<string, string> = {
+    safe: '安全',
+    caution: '注意',
+    danger: '危险',
+    critical: '危急',
+    corrupted: '侵蚀'
+  }
+  return labels[level] || '未知'
+}
+
+function getRiskColor(level: string): string {
+  const colors: Record<string, string> = {
+    safe: '#4caf50',
+    caution: '#ffc107',
+    danger: '#ff9800',
+    critical: '#f44336',
+    corrupted: '#9c27b0'
+  }
+  return colors[level] || '#888'
+}
+
+function getRiskDescription(level: string): string {
+  const descriptions: Record<string, string> = {
+    safe: '精神状态稳定，可以安全存档。',
+    caution: '轻微不安，存档过程可能伴随轻微幻觉。',
+    danger: '精神压力较大，存档可能出现数据偏差。',
+    critical: '濒临崩溃，存档有较大概率损坏！',
+    corrupted: '深渊凝视着你……强行存档可能造成不可逆的精神侵蚀。'
+  }
+  return descriptions[level] || ''
+}
+
 function createNewSave() {
   if (!gameStore.currentCase) {
     alert('请先开始一个案件才能保存进度')
     return
   }
+
+  const risk = saveStore.getCurrentSaveRisk()
   
+  if (risk.level === 'safe' || risk.level === 'caution') {
+    doCreateSave(false)
+    return
+  }
+  
+  const riskLabel = getRiskLabel(risk.level)
+  const riskDesc = getRiskDescription(risk.level)
+  
+  let confirmMsg = `⚠️ 存档风险等级：${riskLabel}\n\n${riskDesc}\n\n`
+  
+  if (risk.corruptionChance > 0) {
+    confirmMsg += `• 数据损坏概率：${Math.round(risk.corruptionChance * 100)}%\n`
+  }
+  if (risk.hallucinationChance > 0) {
+    confirmMsg += `• 幻觉信息注入概率：${Math.round(risk.hallucinationChance * 100)}%\n`
+  }
+  if (risk.sanityLossOnLoad > 0) {
+    confirmMsg += `• 读取时理智损失：-${risk.sanityLossOnLoad}\n`
+  }
+  if (risk.pollutionGain > 0) {
+    confirmMsg += `• 存档过程额外侵蚀：+${risk.pollutionGain}\n`
+  }
+  
+  if (risk.level === 'critical' || risk.level === 'corrupted') {
+    confirmMsg += `\n【警告】高污染状态下存档可能导致严重后果！\n\n是否仍然强制存档？`
+  } else {
+    confirmMsg += `\n是否继续存档？`
+  }
+  
+  if (confirm(confirmMsg)) {
+    doCreateSave(true)
+  }
+}
+
+function doCreateSave(forceSave: boolean) {
   const saveName = `存档 ${new Date().toLocaleString('zh-CN', {
     month: '2-digit',
     day: '2-digit',
@@ -80,8 +169,21 @@ function createNewSave() {
     minute: '2-digit'
   })}`
   
-  if (saveStore.createSave(saveName)) {
-    alert('存档创建成功！')
+  const result = saveStore.createSave(saveName, forceSave)
+  
+  if (result.success) {
+    let msg = '存档创建成功！'
+    if (result.corrupted) {
+      msg += '\n\n⚠️ 注意：此存档已受到精神污染影响，数据可能不完全可靠。'
+    }
+    alert(msg)
+  } else {
+    let msg = '存档创建失败。'
+    if (result.risk) {
+      msg += `\n\n风险等级：${getRiskLabel(result.risk.level)}\n${getRiskDescription(result.risk.level)}`
+      msg += '\n\n可以通过"强制存档"选项继续，但后果自负。'
+    }
+    alert(msg)
   }
 }
 
@@ -121,8 +223,27 @@ function goToCharacter() {
         <p class="page-subtitle">管理你的调查进度存档</p>
       </div>
       <div class="header-actions">
-        <button class="action-btn" @click="createNewSave">
-          <span>💾</span> 创建存档
+        <button 
+          class="action-btn save-btn"
+          :class="{ 
+            'risk-caution': currentSaveRisk?.level === 'caution',
+            'risk-danger': currentSaveRisk?.level === 'danger',
+            'risk-critical': currentSaveRisk?.level === 'critical',
+            'risk-corrupted': currentSaveRisk?.level === 'corrupted',
+            'disabled': !canCreateSave
+          }"
+          @click="createNewSave"
+          :disabled="!canCreateSave"
+        >
+          <span>💾</span> 
+          <span>创建存档</span>
+          <span 
+            v-if="currentSaveRisk && currentSaveRisk.level !== 'safe'" 
+            class="risk-badge"
+            :style="{ backgroundColor: getRiskColor(currentSaveRisk.level) }"
+          >
+            {{ getRiskLabel(currentSaveRisk.level) }}
+          </span>
         </button>
         <button class="action-btn" @click="goToCharacter">
           <span>👤</span> 角色档案
@@ -149,7 +270,10 @@ function goToCharacter() {
         >
           <div class="save-header">
             <div class="save-header-main">
-              <h3 class="save-name">{{ save.name }}</h3>
+              <h3 class="save-name" :class="{ 'corrupted-name': save.name.includes('[污染]') }">
+                {{ save.name }}
+                <span v-if="save.name.includes('[污染]')" class="corrupted-badge">☠️ 受污染</span>
+              </h3>
               <div class="save-meta">
                 <span class="save-case">{{ getCaseName(save.caseId) }}</span>
               </div>
@@ -176,6 +300,27 @@ function goToCharacter() {
                 <span class="sanity-value">{{ save.gameState.sanity }}</span>
                 <span class="sanity-status">{{ getSanityStatus(save.gameState.sanity) }}</span>
               </div>
+            </div>
+
+            <div v-if="save.gameState.spiritualPollution" class="stat-row pollution-row">
+              <span class="stat-label">精神污染</span>
+              <div class="pollution-display">
+                <div class="pollution-mini">
+                  <span class="shock-mini-icon" title="短期惊吓">⚡</span>
+                  <span class="pollution-mini-value">{{ save.gameState.spiritualPollution.shortTermShock }}</span>
+                </div>
+                <div class="pollution-mini">
+                  <span class="erosion-mini-icon" title="长期侵蚀">🕳️</span>
+                  <span class="pollution-mini-value erosion-value">{{ save.gameState.spiritualPollution.longTermErosion }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="save.gameState.spiritualPollution?.unlockedCorruptionMilestones?.length > 0" class="stat-row milestone-row">
+              <span class="stat-label">里程碑</span>
+              <span class="stat-value milestone-value">
+                {{ save.gameState.spiritualPollution.unlockedCorruptionMilestones.length }} 个
+              </span>
             </div>
 
             <div class="stat-row">
@@ -551,6 +696,124 @@ function goToCharacter() {
 
 .info-list li strong {
   color: var(--color-text);
+}
+
+.save-btn {
+  position: relative;
+}
+
+.save-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.risk-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.save-btn.risk-caution {
+  border-color: #ffc107;
+  box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+}
+
+.save-btn.risk-danger {
+  border-color: #ff9800;
+  box-shadow: 0 0 12px rgba(255, 152, 0, 0.4);
+}
+
+.save-btn.risk-critical {
+  border-color: #f44336;
+  box-shadow: 0 0 15px rgba(244, 67, 54, 0.5);
+  animation: critical-pulse 1.5s infinite;
+}
+
+.save-btn.risk-corrupted {
+  border-color: #9c27b0;
+  box-shadow: 0 0 20px rgba(156, 39, 176, 0.6);
+  animation: corrupted-pulse 2s infinite;
+}
+
+@keyframes critical-pulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(244, 67, 54, 0.5); }
+  50% { box-shadow: 0 0 25px rgba(244, 67, 54, 0.8); }
+}
+
+@keyframes corrupted-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 20px rgba(156, 39, 176, 0.6);
+    filter: hue-rotate(0deg);
+  }
+  50% { 
+    box-shadow: 0 0 30px rgba(156, 39, 176, 0.9);
+    filter: hue-rotate(20deg);
+  }
+}
+
+.pollution-row {
+  background: rgba(139, 0, 139, 0.08);
+}
+
+.pollution-display {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+}
+
+.pollution-mini {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.shock-mini-icon {
+  color: #ffd700;
+  font-size: 0.8rem;
+}
+
+.erosion-mini-icon {
+  color: #9c27b0;
+  font-size: 0.8rem;
+}
+
+.pollution-mini-value {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  font-weight: bold;
+}
+
+.pollution-mini-value.erosion-value {
+  color: #e040fb;
+}
+
+.milestone-row {
+  background: rgba(156, 39, 176, 0.1);
+}
+
+.milestone-value {
+  color: #e040fb;
+}
+
+.corrupted-name {
+  color: #9c27b0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.corrupted-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  background: rgba(156, 39, 176, 0.3);
+  border: 1px solid rgba(156, 39, 176, 0.5);
+  border-radius: 8px;
+  color: #e040fb;
 }
 
 @media (max-width: 768px) {
