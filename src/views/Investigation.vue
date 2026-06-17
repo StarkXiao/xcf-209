@@ -5,6 +5,8 @@ import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
 import type { Scene, Evidence, HitRateResult } from '@/types'
+import InventoryPanel from '@/components/inventory/InventoryPanel.vue'
+import CraftingPanel from '@/components/inventory/CraftingPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -14,6 +16,8 @@ const currentScene = ref<Scene | null>(null)
 const selectedEvidence = ref<Evidence | null>(null)
 const showEvidenceDetail = ref(false)
 const showToolPanel = ref(false)
+const showInventoryPanel = ref(false)
+const showCraftingPanel = ref(false)
 const hoveredEvidence = ref<Evidence | null>(null)
 const searchResultMessage = ref('')
 const showSearchResult = ref(false)
@@ -506,6 +510,15 @@ function getShadowStyle(index: number) {
               <span class="action-icon">💡</span>
               <span class="action-text">真相推演</span>
             </button>
+            <button class="action-btn" @click="showInventoryPanel = true">
+              <span class="action-icon">🎒</span>
+              <span class="action-text">调查背包</span>
+              <span class="action-count">{{ gameStore.gameState.inventory.items.length }}</span>
+            </button>
+            <button class="action-btn" @click="showCraftingPanel = true">
+              <span class="action-icon">⚗️</span>
+              <span class="action-text">证据加工</span>
+            </button>
             <button class="action-btn" @click="showGameLog = true">
               <span class="action-icon">📜</span>
               <span class="action-text">调查日志</span>
@@ -627,6 +640,20 @@ function getShadowStyle(index: number) {
             </div>
           </div>
         </div>
+      </transition>
+
+      <transition name="fade">
+        <InventoryPanel 
+          v-if="showInventoryPanel" 
+          @close="showInventoryPanel = false"
+        />
+      </transition>
+
+      <transition name="fade">
+        <CraftingPanel 
+          v-if="showCraftingPanel" 
+          @close="showCraftingPanel = false"
+        />
       </transition>
     </template>
   </div>

@@ -96,6 +96,9 @@ export interface Evidence {
   hiddenClues?: string[]
   isInitiallyHidden?: boolean
   discoveryTrigger?: EvidenceDiscoveryTrigger
+  materialDrops?: MaterialDrop[]
+  processable?: boolean
+  processRecipeId?: string
 }
 
 export interface EvidenceDiscoveryTrigger {
@@ -190,6 +193,135 @@ export interface SearchResult {
   message: string
 }
 
+export interface MaterialDrop {
+  materialId: string
+  minQuantity: number
+  maxQuantity: number
+  chance: number
+}
+
+export type MaterialType = 'organic' | 'inorganic' | 'arcane' | 'document' | 'tool_part' | 'rare'
+
+export interface Material {
+  id: string
+  name: string
+  description: string
+  icon: string
+  type: MaterialType
+  rarity: 'common' | 'uncommon' | 'rare' | 'legendary'
+  stackable: boolean
+  maxStack: number
+  sanityEffect?: number
+  usable: boolean
+  usableEffect?: MaterialUsableEffect
+  tradeValue: number
+}
+
+export interface MaterialUsableEffect {
+  type: 'sanity_restore' | 'sanity_max_increase' | 'tool_repair' | 'hit_rate_boost' | 'reveal_hidden'
+  value: number
+  duration?: number
+}
+
+export interface InventoryItem {
+  materialId: string
+  quantity: number
+}
+
+export interface InventoryState {
+  items: InventoryItem[]
+  capacity: number
+  unlocked: boolean
+}
+
+export type RecipeType = 'process' | 'craft' | 'analyze' | 'upgrade'
+
+export interface Recipe {
+  id: string
+  name: string
+  description: string
+  type: RecipeType
+  icon: string
+  inputs: RecipeIngredient[]
+  outputs: RecipeOutput[]
+  requiredTool?: string
+  requiredClues?: string[]
+  requiredEvidence?: string[]
+  unlockCondition?: RecipeUnlockCondition
+  sanityCost: number
+  timeCost: number
+  successRate: number
+  isSpecial?: boolean
+  category: string
+}
+
+export interface RecipeIngredient {
+  materialId: string
+  quantity: number
+  consumed: boolean
+}
+
+export interface RecipeOutput {
+  type: 'material' | 'tool' | 'clue' | 'sanity' | 'time_bonus' | 'branch_unlock'
+  id?: string
+  quantity: number
+}
+
+export interface RecipeUnlockCondition {
+  type: 'clue_discovered' | 'evidence_discovered' | 'tool_owned' | 'chapter_completed' | 'talent_unlocked'
+  requiredId?: string
+  requiredCount?: number
+}
+
+export interface CraftingResult {
+  success: boolean
+  outputs: RecipeOutput[]
+  message: string
+  criticalSuccess?: boolean
+  criticalFailure?: boolean
+}
+
+export interface AnalysisResult {
+  analysisId: string
+  evidenceId: string
+  findings: string[]
+  unlockedClues?: string[]
+  unlockedBranches?: string[]
+  sanityGain?: number
+  specialReward?: RecipeOutput
+}
+
+export interface ActiveAnalysis {
+  analysisId: string
+  evidenceId: string
+  startTime: number
+  duration: number
+  completed: boolean
+}
+
+export interface GameLogEntry {
+  id: string
+  timestamp: number
+  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break' | 'timer' | 'scene_switch' | 'timeout' | 'penalty' | 'bonus' | 'evidence_refresh' | 'material_drop' | 'crafting' | 'analysis_start' | 'analysis_complete' | 'inventory' | 'recipe_unlock'
+  description: string
+  details?: Record<string, unknown>
+}
+
+export interface TimerState {
+  remainingSeconds: number
+  totalSeconds: number
+  isRunning: boolean
+  isPaused: boolean
+  isExpired: boolean
+  timeBonusUsed: number
+  lastActionTime: number
+  sceneSwitchCount: number
+  searchAttemptCount: number
+  failedSearchCount: number
+  clueAnalysisCount: number
+  evidenceRefreshCount: number
+}
+
 export interface GameState {
   currentCase: string | null
   sanity: number
@@ -206,14 +338,15 @@ export interface GameState {
   selectedToolId: string | null
   failedSearches: string[]
   deductionBranches: string[]
-}
-
-export interface GameLogEntry {
-  id: string
-  timestamp: number
-  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break' | 'timer' | 'scene_switch' | 'timeout' | 'penalty' | 'bonus' | 'evidence_refresh'
-  description: string
-  details?: Record<string, unknown>
+  characterProfileId: string | null
+  triggeredEvents: string[]
+  unlockedHiddenEvidence: string[]
+  timerState: TimerState
+  anomalyState: AnomalyState
+  inventory: InventoryState
+  activeAnalyses: ActiveAnalysis[]
+  unlockedRecipes: string[]
+  craftingHistory: string[]
 }
 
 export interface SaveData {
@@ -226,6 +359,7 @@ export interface SaveData {
   screenshot?: string
   isNewGamePlus?: boolean
   inheritedTools?: string[]
+  characterProfileId?: string
 }
 
 export interface SanityEvent {
@@ -322,43 +456,6 @@ export interface SceneEvent {
   triggered: boolean
 }
 
-export interface GameState {
-  currentCase: string | null
-  sanity: number
-  maxSanity: number
-  discoveredEvidence: string[]
-  discoveredClues: string[]
-  analyzedClues: string[]
-  clueConnections: ClueConnection[]
-  visitedScenes: string[]
-  gameLog: GameLogEntry[]
-  startTime: number
-  lastSaveTime: number
-  tools: Tool[]
-  selectedToolId: string | null
-  failedSearches: string[]
-  deductionBranches: string[]
-  characterProfileId: string | null
-  triggeredEvents: string[]
-  unlockedHiddenEvidence: string[]
-  timerState: TimerState
-}
-
-export interface TimerState {
-  remainingSeconds: number
-  totalSeconds: number
-  isRunning: boolean
-  isPaused: boolean
-  isExpired: boolean
-  timeBonusUsed: number
-  lastActionTime: number
-  sceneSwitchCount: number
-  searchAttemptCount: number
-  failedSearchCount: number
-  clueAnalysisCount: number
-  evidenceRefreshCount: number
-}
-
 export interface CaseScoreBreakdown {
   evidenceScore: number
   clueScore: number
@@ -383,19 +480,6 @@ export interface CaseScoreConfig {
   bonusMultiplier: number
   penaltyMultiplier: number
   gradeThresholds: Record<ScoreGrade, number>
-}
-
-export interface SaveData {
-  id: string
-  name: string
-  caseId: string
-  gameState: GameState
-  createdAt: number
-  updatedAt: number
-  screenshot?: string
-  isNewGamePlus?: boolean
-  inheritedTools?: string[]
-  characterProfileId?: string
 }
 
 export type AnomalyEventType = 'hallucination' | 'misleading_clue' | 'extra_log' | 'deduction_candidate'
@@ -463,27 +547,4 @@ export interface AnomalyState {
   anomalyEventHistory: string[]
   lastAnomalyCheck: number
   anomalyCooldowns: Record<string, number>
-}
-
-export interface GameState {
-  currentCase: string | null
-  sanity: number
-  maxSanity: number
-  discoveredEvidence: string[]
-  discoveredClues: string[]
-  analyzedClues: string[]
-  clueConnections: ClueConnection[]
-  visitedScenes: string[]
-  gameLog: GameLogEntry[]
-  startTime: number
-  lastSaveTime: number
-  tools: Tool[]
-  selectedToolId: string | null
-  failedSearches: string[]
-  deductionBranches: string[]
-  characterProfileId: string | null
-  triggeredEvents: string[]
-  unlockedHiddenEvidence: string[]
-  timerState: TimerState
-  anomalyState: AnomalyState
 }

@@ -60,7 +60,13 @@ export const cases = reactive<Case[]>([
             size: { width: 15, height: 20 },
             baseHitRate: 75,
             toolBoost: ['tool-magnifier-basic', 'tool-magnifier-pro'],
-            hiddenClues: ['clue-call', 'clue-awakening']
+            hiddenClues: ['clue-call', 'clue-awakening'],
+            materialDrops: [
+              { materialId: 'mat-torn-page', minQuantity: 2, maxQuantity: 4, chance: 100 },
+              { materialId: 'mat-organic-residue', minQuantity: 1, maxQuantity: 2, chance: 60 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-document-restore'
           },
           {
             id: 'evidence-symbol',
@@ -73,7 +79,13 @@ export const cases = reactive<Case[]>([
             size: { width: 20, height: 25 },
             baseHitRate: 60,
             toolBoost: ['tool-uv-light', 'tool-uv-light-advanced'],
-            isSpecial: false
+            isSpecial: false,
+            materialDrops: [
+              { materialId: 'mat-ancient-rune', minQuantity: 1, maxQuantity: 2, chance: 70 },
+              { materialId: 'mat-crystal-shard', minQuantity: 1, maxQuantity: 1, chance: 30 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-advanced-evidence-process'
           },
           {
             id: 'evidence-telescope',
@@ -86,7 +98,12 @@ export const cases = reactive<Case[]>([
             size: { width: 12, height: 15 },
             baseHitRate: 70,
             toolBoost: ['tool-fingerprint-kit', 'tool-chemical-analyzer'],
-            hiddenClues: ['clue-substance']
+            hiddenClues: ['clue-substance'],
+            materialDrops: [
+              { materialId: 'metallic-fragment', minQuantity: 2, maxQuantity: 4, chance: 90 },
+              { materialId: 'mat-lens-component', minQuantity: 1, maxQuantity: 2, chance: 50 },
+              { materialId: 'mat-mysterious-liquid', minQuantity: 1, maxQuantity: 2, chance: 65 }
+            ]
           },
           {
             id: 'evidence-hidden-mark',
@@ -100,7 +117,14 @@ export const cases = reactive<Case[]>([
             baseHitRate: 30,
             requiredTool: 'tool-uv-light',
             isSpecial: true,
-            hiddenClues: ['clue-deep-one']
+            hiddenClues: ['clue-deep-one'],
+            materialDrops: [
+              { materialId: 'mat-ancient-rune', minQuantity: 2, maxQuantity: 3, chance: 80 },
+              { materialId: 'mat-abyssal-essence', minQuantity: 1, maxQuantity: 1, chance: 40 },
+              { materialId: 'mat-reagent-powder', minQuantity: 1, maxQuantity: 2, chance: 60 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-special-analysis'
           },
           {
             id: 'evidence-secret-notes',
@@ -119,7 +143,13 @@ export const cases = reactive<Case[]>([
               type: 'clue_analyzed',
               requiredClueId: 'clue-call'
             },
-            hiddenClues: ['clue-truth']
+            hiddenClues: ['clue-truth'],
+            materialDrops: [
+              { materialId: 'mat-cipher-text', minQuantity: 1, maxQuantity: 2, chance: 100 },
+              { materialId: 'mat-torn-page', minQuantity: 3, maxQuantity: 5, chance: 80 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-cipher-decode'
           }
         ]
       },
@@ -141,7 +171,11 @@ export const cases = reactive<Case[]>([
             size: { width: 18, height: 22 },
             baseHitRate: 70,
             toolBoost: ['tool-magnifier-basic'],
-            hiddenClues: ['clue-organization']
+            hiddenClues: ['clue-organization'],
+            materialDrops: [
+              { materialId: 'mat-torn-page', minQuantity: 1, maxQuantity: 3, chance: 90 },
+              { materialId: 'mat-cipher-text', minQuantity: 1, maxQuantity: 1, chance: 40 }
+            ]
           },
           {
             id: 'evidence-photo',
@@ -154,7 +188,11 @@ export const cases = reactive<Case[]>([
             size: { width: 15, height: 18 },
             baseHitRate: 65,
             toolBoost: ['tool-magnifier-pro'],
-            hiddenClues: ['clue-entity']
+            hiddenClues: ['clue-entity'],
+            materialDrops: [
+              { materialId: 'mat-torn-page', minQuantity: 1, maxQuantity: 2, chance: 70 },
+              { materialId: 'mat-crystal-shard', minQuantity: 1, maxQuantity: 1, chance: 35 }
+            ]
           },
           {
             id: 'evidence-amulet',
@@ -166,7 +204,12 @@ export const cases = reactive<Case[]>([
             location: { x: 70, y: 70 },
             size: { width: 10, height: 12 },
             baseHitRate: 55,
-            toolBoost: ['tool-chemical-analyzer']
+            toolBoost: ['tool-chemical-analyzer'],
+            materialDrops: [
+              { materialId: 'mat-ancient-rune', minQuantity: 1, maxQuantity: 2, chance: 60 },
+              { materialId: 'metallic-fragment', minQuantity: 3, maxQuantity: 6, chance: 85 },
+              { materialId: 'mat-elder-sign', minQuantity: 1, maxQuantity: 1, chance: 15 }
+            ]
           },
           {
             id: 'evidence-locked-drawer',
@@ -180,7 +223,12 @@ export const cases = reactive<Case[]>([
             baseHitRate: 40,
             requiredTool: 'tool-lockpick',
             isSpecial: true,
-            hiddenClues: ['clue-ritual']
+            hiddenClues: ['clue-ritual'],
+            materialDrops: [
+              { materialId: 'mat-cipher-text', minQuantity: 1, maxQuantity: 2, chance: 75 },
+              { materialId: 'mat-ancient-rune', minQuantity: 1, maxQuantity: 3, chance: 50 },
+              { materialId: 'mat-circuit-board', minQuantity: 1, maxQuantity: 1, chance: 30 }
+            ]
           },
           {
             id: 'evidence-hidden-chamber',
@@ -199,7 +247,12 @@ export const cases = reactive<Case[]>([
               type: 'evidence_discovered',
               requiredEvidenceId: 'evidence-diary'
             },
-            hiddenClues: ['clue-deep-one']
+            hiddenClues: ['clue-deep-one'],
+            materialDrops: [
+              { materialId: 'mat-abyssal-essence', minQuantity: 1, maxQuantity: 2, chance: 50 },
+              { materialId: 'mat-ancient-rune', minQuantity: 2, maxQuantity: 4, chance: 80 },
+              { materialId: 'mat-medicinal-herb', minQuantity: 1, maxQuantity: 3, chance: 40 }
+            ]
           }
         ]
       },
@@ -220,7 +273,12 @@ export const cases = reactive<Case[]>([
             location: { x: 35, y: 50 },
             size: { width: 25, height: 20 },
             baseHitRate: 80,
-            toolBoost: ['tool-magnifier-basic']
+            toolBoost: ['tool-magnifier-basic'],
+            materialDrops: [
+              { materialId: 'mat-organic-residue', minQuantity: 3, maxQuantity: 6, chance: 100 },
+              { materialId: 'mat-mysterious-liquid', minQuantity: 1, maxQuantity: 3, chance: 70 },
+              { materialId: 'mat-medicinal-herb', minQuantity: 1, maxQuantity: 2, chance: 25 }
+            ]
           },
           {
             id: 'evidence-footprints',
@@ -233,7 +291,11 @@ export const cases = reactive<Case[]>([
             size: { width: 20, height: 15 },
             baseHitRate: 65,
             toolBoost: ['tool-fingerprint-kit'],
-            hiddenClues: ['clue-creature']
+            hiddenClues: ['clue-creature'],
+            materialDrops: [
+              { materialId: 'mat-organic-residue', minQuantity: 1, maxQuantity: 3, chance: 80 },
+              { materialId: 'mat-reagent-powder', minQuantity: 1, maxQuantity: 1, chance: 40 }
+            ]
           },
           {
             id: 'evidence-bottle',
@@ -245,7 +307,11 @@ export const cases = reactive<Case[]>([
             location: { x: 80, y: 65 },
             size: { width: 12, height: 18 },
             baseHitRate: 50,
-            toolBoost: ['tool-magnifier-basic', 'tool-fingerprint-kit']
+            toolBoost: ['tool-magnifier-basic', 'tool-fingerprint-kit'],
+            materialDrops: [
+              { materialId: 'mat-torn-page', minQuantity: 1, maxQuantity: 2, chance: 90 },
+              { materialId: 'mat-cipher-text', minQuantity: 1, maxQuantity: 1, chance: 50 }
+            ]
           },
           {
             id: 'evidence-whisper',
@@ -259,7 +325,14 @@ export const cases = reactive<Case[]>([
             baseHitRate: 25,
             requiredTool: 'tool-recorder',
             isSpecial: true,
-            hiddenClues: ['clue-call-of-deep']
+            hiddenClues: ['clue-call-of-deep'],
+            materialDrops: [
+              { materialId: 'mat-abyssal-essence', minQuantity: 1, maxQuantity: 2, chance: 60 },
+              { materialId: 'mat-ancient-rune', minQuantity: 1, maxQuantity: 2, chance: 50 },
+              { materialId: 'mat-mind-focus', minQuantity: 1, maxQuantity: 1, chance: 25 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-special-analysis'
           },
           {
             id: 'evidence-deep-statue',
@@ -279,7 +352,15 @@ export const cases = reactive<Case[]>([
               requiredSceneVisitCount: 3,
               sceneId: 'scene-shore'
             },
-            hiddenClues: ['clue-entity']
+            hiddenClues: ['clue-entity'],
+            materialDrops: [
+              { materialId: 'mat-ancient-rune', minQuantity: 3, maxQuantity: 5, chance: 90 },
+              { materialId: 'mat-crystal-shard', minQuantity: 2, maxQuantity: 4, chance: 70 },
+              { materialId: 'mat-abyssal-essence', minQuantity: 1, maxQuantity: 3, chance: 50 },
+              { materialId: 'mat-elder-sign', minQuantity: 1, maxQuantity: 1, chance: 20 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-elder-sign-craft'
           },
           {
             id: 'evidence-mysterious-scale',
@@ -296,7 +377,12 @@ export const cases = reactive<Case[]>([
             discoveryTrigger: {
               type: 'random_after_search',
               chance: 12
-            }
+            },
+            materialDrops: [
+              { materialId: 'mat-organic-residue', minQuantity: 2, maxQuantity: 4, chance: 100 },
+              { materialId: 'mat-mysterious-liquid', minQuantity: 1, maxQuantity: 2, chance: 60 },
+              { materialId: 'mat-crystal-shard', minQuantity: 1, maxQuantity: 1, chance: 35 }
+            ]
           }
         ]
       }

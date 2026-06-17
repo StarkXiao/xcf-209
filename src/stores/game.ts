@@ -5,6 +5,7 @@ import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
+import { useInventoryStore } from './inventory'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 import { 
   getAvailableAnomalyEvents, 
@@ -36,6 +37,8 @@ const DEFAULT_SCORE_CONFIG: CaseScoreConfig = {
 
 export const useGameStore = defineStore('game', () => {
   const characterStore = useCharacterStore()
+  
+  const getInventoryStore = () => useInventoryStore()
   
   const activeCharacterId = computed(() => characterStore.activeProfile?.id || null)
   
@@ -85,7 +88,15 @@ export const useGameStore = defineStore('game', () => {
       clueAnalysisCount: 0,
       evidenceRefreshCount: 0
     },
-    anomalyState: createInitialAnomalyState()
+    anomalyState: createInitialAnomalyState(),
+    inventory: {
+      items: [],
+      capacity: 500,
+      unlocked: true
+    },
+    activeAnalyses: [],
+    unlockedRecipes: [],
+    craftingHistory: []
   })
 
   const currentCase = computed(() => {
@@ -195,7 +206,15 @@ export const useGameStore = defineStore('game', () => {
         clueAnalysisCount: 0,
         evidenceRefreshCount: 0
       },
-      anomalyState: createInitialAnomalyState()
+      anomalyState: createInitialAnomalyState(),
+      inventory: {
+        items: [],
+        capacity: 500,
+        unlocked: true
+      },
+      activeAnalyses: [],
+      unlockedRecipes: [],
+      craftingHistory: []
     }
 
     startTimer()
@@ -218,6 +237,9 @@ export const useGameStore = defineStore('game', () => {
     if (maxSanityBonus > 0) {
       addLog('discovery', `天赋加成：最大理智值 +${maxSanityBonus}`)
     }
+
+    getInventoryStore().applyGlobalRecipeUnlocks()
+    getInventoryStore().checkAndUnlockRecipes()
 
     setCaseStatus(caseId, 'in_progress')
     return true
@@ -417,6 +439,18 @@ export const useGameStore = defineStore('game', () => {
       modifySanity(sanityEffect, '接触禁忌知识')
     }
 
+    const caseData = currentCase.value
+    if (caseData) {
+      for (const scene of caseData.scenes) {
+        const evidence = scene.evidence.find(e => e.id === evidenceId)
+        if (evidence && evidence.materialDrops && evidence.materialDrops.length > 0) {
+          getInventoryStore().dropMaterialsFromEvidence(evidenceId, evidence.materialDrops)
+        }
+      }
+    }
+
+    getInventoryStore().checkAndUnlockRecipes()
+
     return true
   }
 
@@ -425,6 +459,7 @@ export const useGameStore = defineStore('game', () => {
 
     gameState.value.discoveredClues.push(clueId)
     addLog('discovery', `获得新线索：${clueId}`)
+    getInventoryStore().checkAndUnlockRecipes()
     return true
   }
 
@@ -1218,6 +1253,7 @@ export const useGameStore = defineStore('game', () => {
     stopTimer()
     resetEvents()
     resetAnomalyEvents()
+    getInventoryStore().resetInventory()
     gameState.value = {
       currentCase: null,
       sanity: 100,
@@ -1251,7 +1287,15 @@ export const useGameStore = defineStore('game', () => {
         clueAnalysisCount: 0,
         evidenceRefreshCount: 0
       },
-      anomalyState: createInitialAnomalyState()
+      anomalyState: createInitialAnomalyState(),
+      inventory: {
+        items: [],
+        capacity: 500,
+        unlocked: true
+      },
+      activeAnalyses: [],
+      unlockedRecipes: [],
+      craftingHistory: []
     }
   }
 
