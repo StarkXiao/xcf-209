@@ -2477,6 +2477,60 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.credibilityMarks.filter(m => m.level === 'suspect' || m.level === 'contradicted').length
   }
 
+  function getAnnotationConnectionBonus(clueId: string): number {
+    const annotations = getAnnotationsForClue(clueId)
+    let bonus = 0
+    annotations.forEach(ann => {
+      switch (ann.type) {
+        case 'insight': bonus += 0.05; break
+        case 'highlight': bonus += 0.03; break
+        case 'note': bonus += 0.02; break
+        case 'question': bonus += 0.01; break
+      }
+    })
+    return bonus
+  }
+
+  function getComparisonConnectionBonus(clue1Id: string, clue2Id: string): number {
+    const comp = gameState.value.comparisons.find(
+      c => (c.clue1Id === clue1Id && c.clue2Id === clue2Id) ||
+           (c.clue1Id === clue2Id && c.clue2Id === clue1Id)
+    )
+    if (!comp) return 0
+    if (comp.conflict) return -0.1
+    return comp.similarity * 0.001
+  }
+
+  function calculateConnectionSuccessRate(clue1Id: string, clue2Id: string): { rate: number; breakdown: string[] } {
+    const breakdown: string[] = []
+    let rate = 0.5
+
+    const credibilityMod = getConnectionSuccessModifier(clue1Id, clue2Id)
+    rate += credibilityMod
+    if (credibilityMod !== 0) {
+      const level1 = getCredibilityLevel(clue1Id)
+      const level2 = getCredibilityLevel(clue2Id)
+      breakdown.push(`可信度修正(${CREDIBILITY_LEVELS[level1].description}+${CREDIBILITY_LEVELS[level2].description}): ${credibilityMod > 0 ? '+' : ''}${Math.round(credibilityMod * 100)}%`)
+    }
+
+    const annBonus1 = getAnnotationConnectionBonus(clue1Id)
+    const annBonus2 = getAnnotationConnectionBonus(clue2Id)
+    const totalAnnBonus = annBonus1 + annBonus2
+    if (totalAnnBonus > 0) {
+      rate += totalAnnBonus
+      breakdown.push(`批注加成: +${Math.round(totalAnnBonus * 100)}%`)
+    }
+
+    const compBonus = getComparisonConnectionBonus(clue1Id, clue2Id)
+    if (compBonus !== 0) {
+      rate += compBonus
+      breakdown.push(`比对修正: ${compBonus > 0 ? '+' : ''}${Math.round(compBonus * 100)}%`)
+    }
+
+    rate = Math.min(0.95, Math.max(0.05, rate))
+    return { rate, breakdown }
+  }
+
   const modifiedDeductionInfoCompleteness = computed(() => {
     const base = gameState.value.intelligenceState.deductionInfoCompleteness
     const hintBonus = getTotalDeductionHintBonus()
@@ -2600,6 +2654,9 @@ export const useGameStore = defineStore('game', () => {
     getConnectionSuccessModifier,
     getTotalDeductionHintBonus,
     getVerifiedClueCount,
-    getSuspectClueCount
+    getSuspectClueCount,
+    getAnnotationConnectionBonus,
+    getComparisonConnectionBonus,
+    calculateConnectionSuccessRate
   }
 })

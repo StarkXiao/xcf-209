@@ -694,6 +694,9 @@ export interface GraphEdge {
   errorMessage?: string
   createdAt: number
   createdBy?: string
+  successRate?: number
+  confirmAttempts?: number
+  lastConfirmResult?: 'success' | 'failure'
 }
 
 export interface GraphValidationResult {
