@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { CaseProgress, CaseRewards } from '@/types'
 import { cases, getCaseById, setCaseStatus } from '@/data/cases'
+import { useGameStore } from './game'
 import { useSaveStore } from './save'
 
 const STORAGE_KEY = 'cthulhu-case-progress'
@@ -14,12 +15,12 @@ export const useProgressStore = defineStore('progress', () => {
       const data = localStorage.getItem(STORAGE_KEY)
       if (data) {
         progressMap.value = JSON.parse(data)
-        syncCaseStatuses()
       }
     } catch (error) {
       console.error('Failed to load progress:', error)
       progressMap.value = {}
     }
+    syncCaseStatuses()
   }
 
   function saveProgressToStorage() {
@@ -35,8 +36,28 @@ export const useProgressStore = defineStore('progress', () => {
       const progress = progressMap.value[c.id]
       if (progress?.completed) {
         c.status = 'completed'
+      } else if (c.prerequisites.length === 0) {
+        c.status = 'available'
+      } else {
+        const allPrereqsCompleted = c.prerequisites.every(
+          prereqId => progressMap.value[prereqId]?.completed
+        )
+        if (allPrereqsCompleted) {
+          c.status = 'available'
+        } else {
+          c.status = 'locked'
+        }
       }
     })
+
+    const gameStore = useGameStore()
+    const activeCaseId = gameStore.gameState.currentCase
+    if (activeCaseId) {
+      const activeCase = getCaseById(activeCaseId)
+      if (activeCase && activeCase.status !== 'completed') {
+        activeCase.status = 'in_progress'
+      }
+    }
   }
 
   function getProgress(caseId: string): CaseProgress | undefined {
