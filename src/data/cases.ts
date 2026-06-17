@@ -2025,6 +2025,42 @@ export function resetCaseForReplay(caseId: string): boolean {
     clue.analyzed = false
   })
 
-  caseData.status = 'available'
+  caseData.status = 'reopened'
+  return true
+}
+
+export function failCase(caseId: string): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+
+  caseData.status = 'failed'
+  return true
+}
+
+export function abandonCase(caseId: string): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+
+  caseData.status = 'abandoned'
+  return true
+}
+
+export function reopenCase(caseId: string): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+
+  caseData.scenes.forEach(scene => {
+    scene.searched = false
+    scene.evidence.forEach(e => {
+      e.discovered = false
+    })
+  })
+
+  caseData.clues.forEach(clue => {
+    clue.discovered = false
+    clue.analyzed = false
+  })
+
+  caseData.status = 'reopened'
   return true
 }

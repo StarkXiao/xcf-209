@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
-import { getCaseById, setCaseStatus } from '@/data/cases'
+import { getCaseById, setCaseStatus, failCase as failCaseData, abandonCase as abandonCaseData } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { useInventoryStore } from './inventory'
 import { useBestiaryStore } from './bestiary'
 import { useNewGamePlusStore } from './newGamePlus'
+import { useProgressStore } from './progress'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 import { 
   getAvailableAnomalyEvents, 
@@ -473,10 +474,36 @@ export const useGameStore = defineStore('game', () => {
     bestiaryStore.checkAndUnlockOnSanityChange(gameState.value.sanity)
 
     if (gameState.value.sanity <= 0) {
+      triggerCaseFailure()
       return 'insane'
     }
     
     return 'ok'
+  }
+
+  function triggerCaseFailure(): void {
+    const caseId = gameState.value.currentCase
+    if (!caseId) return
+
+    addLog('sanity_loss', '💀 理智值归零，调查失败...')
+    failCaseData(caseId)
+    stopTimer()
+
+    const progressStore = useProgressStore()
+    progressStore.recordCaseFailure(caseId, gameState.value.maxSanity - gameState.value.sanity)
+  }
+
+  function abandonCurrentCase(): boolean {
+    const caseId = gameState.value.currentCase
+    if (!caseId) return false
+
+    addLog('sanity_loss', '⏸️ 调查已搁置...')
+    abandonCaseData(caseId)
+    stopTimer()
+
+    const progressStore = useProgressStore()
+    progressStore.recordCaseAbandon(caseId)
+    return true
   }
 
   function calculateHitRate(evidence: Evidence): HitRateResult {
@@ -2951,6 +2978,8 @@ export const useGameStore = defineStore('game', () => {
     getConnectionSuccessRate,
     generateDeductionHints,
     getDeductionHints,
-    dismissDeductionHint
+    dismissDeductionHint,
+    triggerCaseFailure,
+    abandonCurrentCase
   }
 })

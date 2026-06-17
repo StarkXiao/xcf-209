@@ -5,6 +5,7 @@ import { useSaveStore } from '@/stores/save'
 import { useGameStore } from '@/stores/game'
 import { useCharacterStore } from '@/stores/character'
 import { getCaseById } from '@/data/cases'
+import type { Case } from '@/types'
 import { getToolById } from '@/data/tools'
 import { getTalentById } from '@/data/talents'
 
@@ -64,6 +65,31 @@ function deleteSaveData(saveId: string) {
 function getCaseName(caseId: string): string {
   const caseData = getCaseById(caseId)
   return caseData?.title || '未知案件'
+}
+
+function getCaseStatus(caseId: string): Case['status'] | null {
+  const caseData = getCaseById(caseId)
+  return caseData?.status || null
+}
+
+const caseStatusLabels: Record<string, string> = {
+  locked: '🔒 未解锁',
+  available: '🔍 可调查',
+  in_progress: '⏳ 调查中',
+  completed: '✓ 已结案',
+  failed: '❌ 调查失败',
+  abandoned: '⏸️ 已搁置',
+  reopened: '🔄 重新调查'
+}
+
+const caseStatusColors: Record<string, string> = {
+  locked: '#555',
+  available: '#4a90d9',
+  in_progress: '#6b4c9a',
+  completed: '#3a8b5a',
+  failed: '#8b3a3a',
+  abandoned: '#8b6b3a',
+  reopened: '#d4850a'
 }
 
 function getSanityColor(sanity: number): string {
@@ -276,6 +302,9 @@ function goToCharacter() {
               </h3>
               <div class="save-meta">
                 <span class="save-case">{{ getCaseName(save.caseId) }}</span>
+                <span v-if="getCaseStatus(save.caseId)" class="save-case-status" :style="{ color: caseStatusColors[getCaseStatus(save.caseId)!] }">
+                  {{ caseStatusLabels[getCaseStatus(save.caseId)!] }}
+                </span>
               </div>
             </div>
             <div class="save-character">
@@ -549,6 +578,11 @@ function goToCharacter() {
   background: rgba(107, 76, 154, 0.2);
   border-radius: 12px;
   color: var(--color-text-dim);
+}
+
+.save-case-status {
+  font-size: 0.8rem;
+  font-weight: bold;
 }
 
 .save-stats {

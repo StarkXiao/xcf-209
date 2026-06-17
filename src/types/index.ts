@@ -3,7 +3,7 @@ export interface Case {
   title: string
   description: string
   difficulty: 'easy' | 'normal' | 'hard'
-  status: 'locked' | 'available' | 'in_progress' | 'completed'
+  status: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
   scenes: Scene[]
   clues: Clue[]
   conclusion: Conclusion
@@ -38,6 +38,9 @@ export interface CaseProgress {
   completed: boolean
   completedAt?: number
   playCount: number
+  failedCount: number
+  abandonedCount: number
+  lastStatus?: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
   unlockedBranches: string[]
   bestEnding?: string
   discoveredEvidence: string[]
@@ -62,7 +65,7 @@ export interface ChapterNode {
   id: string
   chapter: number
   title: string
-  status: 'locked' | 'available' | 'in_progress' | 'completed'
+  status: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
   prerequisites: string[]
   children: string[]
   isLocked: boolean

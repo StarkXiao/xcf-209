@@ -2,11 +2,39 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCharacterStore } from '@/stores/character'
+import { useGameStore } from '@/stores/game'
+import { cases } from '@/data/cases'
 
 const router = useRouter()
 const characterStore = useCharacterStore()
+const gameStore = useGameStore()
 
 const activeProfile = computed(() => characterStore.activeProfile)
+
+const statusSummary = computed(() => {
+  const summary = {
+    in_progress: 0,
+    reopened: 0,
+    failed: 0,
+    abandoned: 0,
+    completed: 0,
+    available: 0,
+    locked: 0
+  }
+  cases.forEach(c => {
+    if (summary[c.status] !== undefined) {
+      summary[c.status]++
+    }
+  })
+  return summary
+})
+
+const currentCaseInfo = computed(() => {
+  const caseId = gameStore.gameState.currentCase
+  if (!caseId) return null
+  const caseData = cases.find(c => c.id === caseId)
+  return caseData ? { id: caseId, title: caseData.title, status: caseData.status } : null
+})
 
 const features = [
   {
@@ -136,6 +164,44 @@ function goToCommissionHall() {
         <div class="tentacle t2"></div>
         <div class="tentacle t3"></div>
         <div class="eye-glow"></div>
+      </div>
+    </div>
+
+    <div class="status-overview-section">
+      <h2 class="section-title">案件进展</h2>
+      <div class="status-overview-grid">
+        <div class="status-card card in-progress-card" @click="router.push('/cases')">
+          <div class="status-icon">⏳</div>
+          <div class="status-count">{{ statusSummary.in_progress + statusSummary.reopened }}</div>
+          <div class="status-label">进行中</div>
+        </div>
+        <div class="status-card card failed-card" @click="router.push('/cases')">
+          <div class="status-icon">❌</div>
+          <div class="status-count">{{ statusSummary.failed }}</div>
+          <div class="status-label">调查失败</div>
+        </div>
+        <div class="status-card card abandoned-card" @click="router.push('/cases')">
+          <div class="status-icon">⏸️</div>
+          <div class="status-count">{{ statusSummary.abandoned }}</div>
+          <div class="status-label">已搁置</div>
+        </div>
+        <div class="status-card card completed-card" @click="router.push('/cases')">
+          <div class="status-icon">✓</div>
+          <div class="status-count">{{ statusSummary.completed }}</div>
+          <div class="status-label">已结案</div>
+        </div>
+        <div class="status-card card available-card" @click="router.push('/cases')">
+          <div class="status-icon">🔍</div>
+          <div class="status-count">{{ statusSummary.available }}</div>
+          <div class="status-label">可调查</div>
+        </div>
+      </div>
+
+      <div v-if="currentCaseInfo" class="current-case-card card" @click="router.push(`/investigation/${currentCaseInfo.id}`)">
+        <div class="current-case-label">当前案件</div>
+        <div class="current-case-title">{{ currentCaseInfo.title }}</div>
+        <div class="current-case-status">{{ currentCaseInfo.status === 'in_progress' ? '⏳ 调查中' : '🔄 重新调查' }}</div>
+        <div class="current-case-action">点击继续 →</div>
       </div>
     </div>
 
@@ -359,6 +425,149 @@ function goToCommissionHall() {
 .features-section {
   padding: 4rem 2rem;
   background: rgba(0, 0, 0, 0.2);
+}
+
+.status-overview-section {
+  padding: 3rem 2rem;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.status-overview-grid {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1rem;
+}
+
+.status-card {
+  text-align: center;
+  padding: 1.25rem 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.status-card:hover {
+  transform: translateY(-3px);
+}
+
+.status-icon {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.status-count {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--color-text);
+  margin-bottom: 0.25rem;
+}
+
+.status-label {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.in-progress-card {
+  border-color: #6b4c9a;
+}
+
+.in-progress-card:hover {
+  box-shadow: 0 8px 25px rgba(107, 76, 154, 0.3);
+}
+
+.in-progress-card .status-count {
+  color: #6b4c9a;
+}
+
+.failed-card {
+  border-color: #8b3a3a;
+}
+
+.failed-card:hover {
+  box-shadow: 0 8px 25px rgba(139, 58, 58, 0.3);
+}
+
+.failed-card .status-count {
+  color: #8b3a3a;
+}
+
+.abandoned-card {
+  border-color: #8b6b3a;
+}
+
+.abandoned-card:hover {
+  box-shadow: 0 8px 25px rgba(139, 107, 58, 0.3);
+}
+
+.abandoned-card .status-count {
+  color: #8b6b3a;
+}
+
+.completed-card {
+  border-color: #3a8b5a;
+}
+
+.completed-card:hover {
+  box-shadow: 0 8px 25px rgba(58, 139, 90, 0.3);
+}
+
+.completed-card .status-count {
+  color: #3a8b5a;
+}
+
+.available-card {
+  border-color: #4a90d9;
+}
+
+.available-card:hover {
+  box-shadow: 0 8px 25px rgba(74, 144, 217, 0.3);
+}
+
+.available-card .status-count {
+  color: #4a90d9;
+}
+
+.current-case-card {
+  max-width: 500px;
+  margin: 1.5rem auto 0;
+  padding: 1.25rem 1.5rem;
+  background: rgba(107, 76, 154, 0.2);
+  border-color: var(--color-accent);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.current-case-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(107, 76, 154, 0.4);
+}
+
+.current-case-label {
+  font-size: 0.75rem;
+  color: var(--color-accent-light);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.25rem;
+}
+
+.current-case-title {
+  font-size: 1.2rem;
+  color: var(--color-text);
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.current-case-status {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  margin-bottom: 0.5rem;
+}
+
+.current-case-action {
+  font-size: 0.9rem;
+  color: var(--color-accent-light);
+  font-weight: bold;
 }
 
 .section-title {

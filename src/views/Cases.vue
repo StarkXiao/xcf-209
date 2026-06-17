@@ -36,7 +36,20 @@ const statusLabels = {
   locked: '🔒 未解锁',
   available: '🔍 可调查',
   in_progress: '⏳ 调查中',
-  completed: '✓ 已结案'
+  completed: '✓ 已结案',
+  failed: '❌ 调查失败',
+  abandoned: '⏸️ 已搁置',
+  reopened: '🔄 重新调查'
+}
+
+const statusColors: Record<string, string> = {
+  locked: '#555',
+  available: '#4a90d9',
+  in_progress: '#6b4c9a',
+  completed: '#3a8b5a',
+  failed: '#8b3a3a',
+  abandoned: '#8b6b3a',
+  reopened: '#d4850a'
 }
 
 const chapterNames: Record<number, string> = {
@@ -69,7 +82,7 @@ const overallProgress = computed(() => {
 function selectCase(caseItem: typeof cases[0]) {
   if (caseItem.status === 'locked') return
   
-  if (caseItem.status === 'available' || caseItem.status === 'in_progress') {
+  if (caseItem.status === 'available' || caseItem.status === 'in_progress' || caseItem.status === 'reopened') {
     if (gameStore.currentCase && gameStore.currentCase.id !== caseItem.id) {
       if (!confirm('当前有未完成的案件，确定要切换吗？')) {
         return
@@ -80,6 +93,34 @@ function selectCase(caseItem: typeof cases[0]) {
     router.push(`/investigation/${caseItem.id}`)
   } else if (caseItem.status === 'completed') {
     startNewGamePlus(caseItem)
+  } else if (caseItem.status === 'failed') {
+    if (confirm('此案件调查失败，是否重新调查？')) {
+      retryCase(caseItem)
+    }
+  } else if (caseItem.status === 'abandoned') {
+    if (confirm('此案件已搁置，是否继续调查？')) {
+      resumeCase(caseItem)
+    }
+  }
+}
+
+function retryCase(caseItem: typeof cases[0]) {
+  const success = progressStore.reopenCaseProgress(caseItem.id)
+  if (success) {
+    gameStore.startCase(caseItem.id)
+    router.push(`/investigation/${caseItem.id}`)
+  } else {
+    alert('重新调查失败，请重试')
+  }
+}
+
+function resumeCase(caseItem: typeof cases[0]) {
+  const success = progressStore.reopenCaseProgress(caseItem.id)
+  if (success) {
+    gameStore.startCase(caseItem.id)
+    router.push(`/investigation/${caseItem.id}`)
+  } else {
+    alert('继续调查失败，请重试')
   }
 }
 
@@ -104,6 +145,8 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
   if (caseItem.status === 'locked') return 0
   if (caseItem.status === 'available') return 0
   if (caseItem.status === 'completed') return 100
+  if (caseItem.status === 'failed') return 0
+  if (caseItem.status === 'reopened') return 0
   
   if (gameStore.currentCase && gameStore.currentCase.id === caseItem.id) {
     const totalEvidence = caseItem.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
@@ -126,6 +169,14 @@ function getBranchesCount(caseId: string): number {
 
 function getPlayCount(caseId: string): number {
   return progressStore.getProgress(caseId)?.playCount || 0
+}
+
+function getFailedCount(caseId: string): number {
+  return progressStore.getProgress(caseId)?.failedCount || 0
+}
+
+function getAbandonedCount(caseId: string): number {
+  return progressStore.getProgress(caseId)?.abandonedCount || 0
 }
 
 function getPrereqNames(prereqIds: string[]): string[] {
@@ -239,6 +290,9 @@ function isNewGamePlusCase(caseId: string): boolean {
                 locked: caseItem.status === 'locked',
                 available: caseItem.status === 'available',
                 completed: caseItem.status === 'completed',
+                failed: caseItem.status === 'failed',
+                abandoned: caseItem.status === 'abandoned',
+                reopened: caseItem.status === 'reopened',
                 active: gameStore.currentCase?.id === caseItem.id,
                 'hidden-case': isHiddenCase(caseItem.id),
                 'ngplus-case': isNewGamePlusCase(caseItem.id)
@@ -246,7 +300,7 @@ function isNewGamePlusCase(caseId: string): boolean {
               @click="selectCase(caseItem)"
             >
               <div class="case-header">
-                <div class="case-status">
+                <div class="case-status" :style="{ color: statusColors[caseItem.status] }">
                   <span v-if="isHiddenCase(caseItem.id)" class="hidden-badge">🔮 隐藏</span>
                   <span v-else-if="isNewGamePlusCase(caseItem.id)" class="ngplus-case-badge">🌟 NG+</span>
                   {{ statusLabels[caseItem.status] }}
@@ -305,11 +359,40 @@ function isNewGamePlusCase(caseId: string): boolean {
               </div>
             </div>
 
-            <div v-if="caseItem.status !== 'locked' && caseItem.status !== 'completed'" class="case-progress">
+            <div v-if="caseItem.status === 'failed'" class="case-stats failed-stats">
+              <div class="stat-item">
+                <span class="stat-label">失败次数</span>
+                <span class="stat-value failed-value">{{ getFailedCount(caseItem.id) }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">游玩次数</span>
+                <span class="stat-value">{{ getPlayCount(caseItem.id) }}</span>
+              </div>
+            </div>
+
+            <div v-if="caseItem.status === 'abandoned'" class="case-stats abandoned-stats">
+              <div class="stat-item">
+                <span class="stat-label">搁置次数</span>
+                <span class="stat-value abandoned-value">{{ getAbandonedCount(caseItem.id) }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">游玩次数</span>
+                <span class="stat-value">{{ getPlayCount(caseItem.id) }}</span>
+              </div>
+            </div>
+
+            <div v-if="caseItem.status !== 'locked' && caseItem.status !== 'completed' && caseItem.status !== 'failed' && caseItem.status !== 'abandoned'" class="case-progress">
               <div class="progress-bar">
                 <div class="progress-fill" :style="{ width: `${getCaseProgress(caseItem)}%` }"></div>
               </div>
               <span class="progress-text">{{ getCaseProgress(caseItem) }}% 完成</span>
+            </div>
+
+            <div v-if="caseItem.status === 'failed' || caseItem.status === 'abandoned'" class="case-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" :class="{ 'failed-fill': caseItem.status === 'failed', 'abandoned-fill': caseItem.status === 'abandoned' }" :style="{ width: `${getCaseProgress(caseItem)}%` }"></div>
+              </div>
+              <span class="progress-text">{{ caseItem.status === 'failed' ? '调查失败' : '已搁置' }}</span>
             </div>
 
             <div v-if="caseItem.status === 'locked'" class="locked-overlay">
@@ -322,9 +405,21 @@ function isNewGamePlusCase(caseId: string): boolean {
               </div>
             </div>
             
-            <div v-if="caseItem.status !== 'locked' && caseItem.status !== 'completed'" class="case-actions">
+            <div v-if="caseItem.status !== 'locked' && caseItem.status !== 'completed' && caseItem.status !== 'failed' && caseItem.status !== 'abandoned'" class="case-actions">
               <button class="start-btn primary" @click.stop="selectCase(caseItem)">
                 {{ caseItem.status === 'in_progress' && gameStore.currentCase?.id === caseItem.id ? '继续调查' : '开始调查' }}
+              </button>
+            </div>
+            
+            <div v-if="caseItem.status === 'failed'" class="case-actions">
+              <button class="retry-btn danger" @click.stop="retryCase(caseItem)">
+                🔄 重新调查
+              </button>
+            </div>
+
+            <div v-if="caseItem.status === 'abandoned'" class="case-actions">
+              <button class="resume-btn warning" @click.stop="resumeCase(caseItem)">
+                ▶️ 继续调查
               </button>
             </div>
             
@@ -488,6 +583,36 @@ function isNewGamePlusCase(caseId: string): boolean {
 .case-card.completed:hover {
   transform: translateY(-3px);
   box-shadow: 0 8px 25px rgba(58, 139, 90, 0.25);
+}
+
+.case-card.failed {
+  border-color: var(--color-danger);
+}
+
+.case-card.failed:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(139, 58, 58, 0.25);
+}
+
+.case-card.abandoned {
+  border-color: #8b6b3a;
+  opacity: 0.85;
+}
+
+.case-card.abandoned:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(139, 107, 58, 0.25);
+  opacity: 1;
+}
+
+.case-card.reopened {
+  border-color: #d4850a;
+  box-shadow: 0 0 15px rgba(212, 133, 10, 0.2);
+}
+
+.case-card.reopened:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 30px rgba(212, 133, 10, 0.3);
 }
 
 .case-card.active {
@@ -933,5 +1058,61 @@ function isNewGamePlusCase(caseId: string): boolean {
 .case-actions {
   display: flex;
   flex-direction: column;
+}
+
+.retry-btn,
+.resume-btn {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.retry-btn.danger {
+  background: linear-gradient(135deg, #8b3a3a, #a04040);
+  color: white;
+}
+
+.retry-btn.danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(139, 58, 58, 0.4);
+}
+
+.resume-btn.warning {
+  background: linear-gradient(135deg, #8b6b3a, #a07840);
+  color: white;
+}
+
+.resume-btn.warning:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(139, 107, 58, 0.4);
+}
+
+.failed-fill {
+  background: #8b3a3a !important;
+}
+
+.abandoned-fill {
+  background: #8b6b3a !important;
+}
+
+.failed-value {
+  color: #8b3a3a;
+}
+
+.abandoned-value {
+  color: #8b6b3a;
+}
+
+.failed-stats {
+  border-top: 1px solid rgba(139, 58, 58, 0.3);
+}
+
+.abandoned-stats {
+  border-top: 1px solid rgba(139, 107, 58, 0.3);
 }
 </style>
