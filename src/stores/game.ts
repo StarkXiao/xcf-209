@@ -7,6 +7,7 @@ import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { useInventoryStore } from './inventory'
 import { useBestiaryStore } from './bestiary'
+import { useNewGamePlusStore } from './newGamePlus'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 import { 
   getAvailableAnomalyEvents, 
@@ -215,7 +216,10 @@ export const useGameStore = defineStore('game', () => {
 
     const baseMaxSanity = 100
     const maxSanityBonus = talentEffects.value.maxSanityBonus
-    const finalMaxSanity = baseMaxSanity + maxSanityBonus
+    
+    const newGamePlusStore = useNewGamePlusStore()
+    const carriedSanityBonus = newGamePlusStore.state.carriedSanityBonus
+    const finalMaxSanity = baseMaxSanity + maxSanityBonus + carriedSanityBonus
 
     const charId = activeCharacterId.value
     const timeLimit = caseData.timeLimit || { totalSeconds: 900, sceneSwitchCost: 10, searchAttemptCost: 5, failedSearchPenalty: 15, clueAnalysisCost: 8 }
@@ -290,6 +294,11 @@ export const useGameStore = defineStore('game', () => {
     if (maxSanityBonus > 0) {
       addLog('discovery', `天赋加成：最大理智值 +${maxSanityBonus}`)
     }
+    if (carriedSanityBonus > 0) {
+      addLog('discovery', `🔄 二周目继承：最大理智值 +${carriedSanityBonus}`)
+    }
+
+    newGamePlusStore.checkSpecialEvidence()
 
     getInventoryStore().applyGlobalRecipeUnlocks()
     getInventoryStore().checkAndUnlockRecipes()
@@ -783,7 +792,10 @@ export const useGameStore = defineStore('game', () => {
 
   function isEvidenceVisible(evidence: Evidence): boolean {
     if (!evidence.isInitiallyHidden) return true
-    return gameState.value.unlockedHiddenEvidence.includes(evidence.id)
+    if (gameState.value.unlockedHiddenEvidence.includes(evidence.id)) return true
+    
+    const newGamePlusStore = useNewGamePlusStore()
+    return newGamePlusStore.isEvidenceUnlocked(evidence.id)
   }
 
   function unlockHiddenEvidence(evidenceId: string, reason: string) {

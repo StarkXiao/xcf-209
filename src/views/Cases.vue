@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { cases, resetCaseForReplay } from '@/data/cases'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
 import { useProgressStore } from '@/stores/progress'
+import { useNewGamePlusStore } from '@/stores/newGamePlus'
 import { getToolById } from '@/data/tools'
 
 const router = useRouter()
 const gameStore = useGameStore()
 const saveStore = useSaveStore()
 const progressStore = useProgressStore()
+const newGamePlusStore = useNewGamePlusStore()
+
+onMounted(() => {
+  newGamePlusStore.checkAndUnlockMilestones()
+  newGamePlusStore.checkHiddenCases()
+  newGamePlusStore.checkSpecialEvidence()
+})
 
 const difficultyColors = {
   easy: '#3a8b5a',
@@ -44,6 +52,14 @@ const globalToolNames = computed(() => {
     .map(id => getToolById(id)?.name || id)
 })
 
+const playthroughCount = computed(() => newGamePlusStore.state.playthroughCount)
+const carriedSanityBonus = computed(() => newGamePlusStore.state.carriedSanityBonus)
+const unlockedMilestones = computed(() => newGamePlusStore.unlockedMilestones)
+const milestoneProgress = computed(() => newGamePlusStore.milestoneProgress)
+const inheritedBestiaryCount = computed(() => newGamePlusStore.state.inheritedBestiary.totalDiscovered)
+const unlockedHiddenCasesCount = computed(() => newGamePlusStore.state.unlockedHiddenCases.length)
+const unlockedEndingsCount = computed(() => newGamePlusStore.state.unlockedEndings.length)
+
 const overallProgress = computed(() => {
   const total = cases.length
   const completed = progressStore.totalCompleted
@@ -76,13 +92,12 @@ function startNewGamePlus(caseItem: typeof cases[0]) {
 
   resetCaseForReplay(caseItem.id)
 
-  const inherited = saveStore.globalUnlockedTools
-  gameStore.startCase(caseItem.id, inherited.length > 0 ? inherited : undefined)
-
-  gameStore.modifySanity(20, 'New Game+ 奖励')
-  gameStore.addLog('discovery', 'New Game+：继承了全局解锁工具')
-  
-  router.push(`/investigation/${caseItem.id}`)
+  const success = newGamePlusStore.startNewGamePlus(caseItem.id)
+  if (success) {
+    router.push(`/investigation/${caseItem.id}`)
+  } else {
+    alert('启动二周目失败，请重试')
+  }
 }
 
 function getCaseProgress(caseItem: typeof cases[0]): number {
@@ -138,6 +153,14 @@ function formatCaseTime(seconds: number): string {
   }
   return `${secs}秒`
 }
+
+function isHiddenCase(caseId: string): boolean {
+  return newGamePlusStore.state.unlockedHiddenCases.includes(caseId) || caseId.startsWith('case-secret')
+}
+
+function isNewGamePlusCase(caseId: string): boolean {
+  return caseId.startsWith('case-secret')
+}
 </script>
 
 <template>
@@ -145,6 +168,39 @@ function formatCaseTime(seconds: number): string {
     <div class="page-header">
       <h1 class="page-title">案件档案</h1>
       <p class="page-subtitle">选择一个案件开始你的调查</p>
+      
+      <div v-if="playthroughCount > 1" class="ngplus-header">
+        <div class="ngplus-badge">
+          🔄 第 {{ playthroughCount }} 周目
+        </div>
+        <div v-if="carriedSanityBonus > 0" class="ngplus-bonus">
+          ⚡ 继承理智加成: +{{ carriedSanityBonus }}
+        </div>
+        <div v-if="inheritedBestiaryCount > 0" class="ngplus-bonus">
+          📚 继承图鉴: {{ inheritedBestiaryCount }} 项
+        </div>
+      </div>
+
+      <div class="milestone-progress">
+        <span class="milestone-label">🏆 成就进度</span>
+        <div class="progress-bar-large">
+          <div class="progress-fill milestone-fill" :style="{ width: `${milestoneProgress}%` }"></div>
+        </div>
+        <span class="milestone-value">{{ unlockedMilestones.length }} / {{ newGamePlusStore.totalMilestones }}</span>
+      </div>
+
+      <div class="ngplus-stats">
+        <span v-if="unlockedHiddenCasesCount > 0" class="stat-chip">
+          🔮 隐藏案件: {{ unlockedHiddenCasesCount }}
+        </span>
+        <span v-if="unlockedEndingsCount > 0" class="stat-chip">
+          🌟 特殊结局: {{ unlockedEndingsCount }}
+        </span>
+        <span class="stat-chip">
+          🎒 继承工具: {{ globalToolNames.length }}
+        </span>
+      </div>
+
       <div class="overall-progress">
         <span class="progress-label">总进度</span>
         <div class="progress-bar-large">
@@ -166,26 +222,32 @@ function formatCaseTime(seconds: number): string {
 
         <div class="cases-grid">
           <div 
-            v-for="caseItem in chapter.cases" 
-            :key="caseItem.id"
-            class="case-card card"
-            :class="{ 
-              locked: caseItem.status === 'locked',
-              available: caseItem.status === 'available',
-              completed: caseItem.status === 'completed',
-              active: gameStore.currentCase?.id === caseItem.id
-            }"
-            @click="selectCase(caseItem)"
-          >
-            <div class="case-header">
-              <div class="case-status">{{ statusLabels[caseItem.status] }}</div>
-              <div 
-                class="case-difficulty"
-                :style="{ backgroundColor: difficultyColors[caseItem.difficulty] }"
-              >
-                {{ difficultyLabels[caseItem.difficulty] }}
+              v-for="caseItem in chapter.cases" 
+              :key="caseItem.id"
+              class="case-card card"
+              :class="{ 
+                locked: caseItem.status === 'locked',
+                available: caseItem.status === 'available',
+                completed: caseItem.status === 'completed',
+                active: gameStore.currentCase?.id === caseItem.id,
+                'hidden-case': isHiddenCase(caseItem.id),
+                'ngplus-case': isNewGamePlusCase(caseItem.id)
+              }"
+              @click="selectCase(caseItem)"
+            >
+              <div class="case-header">
+                <div class="case-status">
+                  <span v-if="isHiddenCase(caseItem.id)" class="hidden-badge">🔮 隐藏</span>
+                  <span v-else-if="isNewGamePlusCase(caseItem.id)" class="ngplus-case-badge">🌟 NG+</span>
+                  {{ statusLabels[caseItem.status] }}
+                </div>
+                <div 
+                  class="case-difficulty"
+                  :style="{ backgroundColor: difficultyColors[caseItem.difficulty] }"
+                >
+                  {{ difficultyLabels[caseItem.difficulty] }}
+                </div>
               </div>
-            </div>
 
             <h2 class="case-title">{{ caseItem.title }}</h2>
             <p class="case-description">{{ caseItem.description }}</p>
@@ -687,5 +749,122 @@ function formatCaseTime(seconds: number): string {
   .page-title {
     font-size: 2rem;
   }
+}
+
+.ngplus-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.ngplus-badge {
+  display: inline-block;
+  padding: 0.5rem 1.5rem;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 1rem;
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
+}
+
+.ngplus-bonus {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  background: rgba(58, 139, 90, 0.2);
+  border: 1px solid var(--color-success);
+  border-radius: 16px;
+  color: var(--color-success);
+  font-size: 0.9rem;
+}
+
+.milestone-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.milestone-label {
+  font-size: 0.9rem;
+  color: var(--color-text-dim);
+}
+
+.milestone-fill {
+  background: linear-gradient(90deg, #ffd700, #ff8c00);
+}
+
+.milestone-value {
+  font-size: 0.9rem;
+  color: #ffd700;
+  font-weight: bold;
+}
+
+.ngplus-stats {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.stat-chip {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  background: rgba(107, 76, 154, 0.15);
+  border: 1px solid var(--color-accent);
+  border-radius: 12px;
+  color: var(--color-accent-light);
+  font-size: 0.8rem;
+}
+
+.hidden-badge,
+.ngplus-case-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  margin-right: 0.5rem;
+}
+
+.hidden-badge {
+  background: rgba(139, 74, 201, 0.3);
+  color: #c9a0ff;
+  border: 1px solid #8b4ac9;
+}
+
+.ngplus-case-badge {
+  background: rgba(255, 215, 0, 0.2);
+  color: #ffd700;
+  border: 1px solid #ffd700;
+}
+
+.case-card.hidden-case {
+  border: 2px solid #8b4ac9;
+  box-shadow: 0 0 20px rgba(139, 74, 201, 0.25);
+}
+
+.case-card.hidden-case .case-title {
+  color: #c9a0ff;
+}
+
+.case-card.ngplus-case {
+  border: 2px solid #ffd700;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
+}
+
+.case-card.ngplus-case .case-title {
+  color: #ffd700;
+}
+
+.inherit-info.ngplus-info {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 140, 0, 0.1));
+  border: 1px solid #ffd700;
 }
 </style>

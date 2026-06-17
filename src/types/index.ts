@@ -991,3 +991,85 @@ declare module './index' {
     spiritualPollution: SpiritualPollutionState
   }
 }
+
+export interface NewGamePlusState {
+  playthroughCount: number
+  isNewGamePlus: boolean
+  inheritedCaseProgress: Record<string, InheritedCaseData>
+  inheritedBestiary: InheritedBestiaryData
+  unlockedHiddenCases: string[]
+  unlockedSpecialEvidence: string[]
+  unlockedEndings: string[]
+  globalMilestones: GlobalMilestone[]
+  unlockedRecipes: string[]
+  carriedSanityBonus: number
+}
+
+export interface InheritedCaseData {
+  caseId: string
+  completed: boolean
+  bestGrade?: ScoreGrade
+  bestScore?: number
+  unlockedBranches: string[]
+  discoveredEvidence: string[]
+  discoveredClues: string[]
+  playCount: number
+  fastestTime?: number
+  endings: string[]
+}
+
+export interface InheritedBestiaryData {
+  discoveredCreatures: string[]
+  discoveredItems: string[]
+  discoveredOrganizations: string[]
+  totalDiscovered: number
+}
+
+export interface GlobalMilestone {
+  id: string
+  name: string
+  description: string
+  unlocked: boolean
+  unlockedAt?: number
+  reward?: MilestoneReward
+  requirement: MilestoneRequirement
+}
+
+export interface MilestoneReward {
+  tools?: string[]
+  sanityBonus?: number
+  unlockCases?: string[]
+  unlockEvidence?: string[]
+  unlockEndings?: string[]
+}
+
+export interface MilestoneRequirement {
+  type: 'total_cases_completed' | 'specific_case_completed' | 'branch_unlocked' | 'bestiary_discovered' | 'grade_achieved' | 'ending_unlocked' | 'evidence_discovered' | 'playthrough_count'
+  targetCount?: number
+  targetIds?: string[]
+  minGrade?: ScoreGrade
+}
+
+export interface HiddenCaseConfig {
+  id: string
+  parentCaseId: string
+  unlockRequirements: MilestoneRequirement[]
+  isUnlocked: boolean
+}
+
+export interface SpecialEvidenceConfig {
+  id: string
+  caseId: string
+  sceneId: string
+  unlockRequirements: MilestoneRequirement[]
+  ngPlusOnly: boolean
+}
+
+export interface NewGamePlusEnding {
+  id: string
+  caseId: string
+  name: string
+  description: string
+  unlockRequirements: MilestoneRequirement[]
+  isNgPlusExclusive: boolean
+}

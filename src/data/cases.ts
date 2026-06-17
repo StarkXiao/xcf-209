@@ -639,6 +639,131 @@ export const cases = reactive<Case[]>([
         }
       ]
     }
+  },
+  {
+    id: 'case-secret-final',
+    title: '星辰裁决',
+    description: '【隐藏案件】当所有真相被揭开，星辰裁决所的大门向你敞开。你将直面人类对抗超自然威胁的最后防线...以及他们守护的终极秘密。',
+    difficulty: 'hard',
+    status: 'locked',
+    sanityCost: 50,
+    recommendedSanity: 80,
+    startingTools: ['tool-magnifier-pro', 'tool-fingerprint-kit', 'tool-uv-light-advanced', 'tool-recorder', 'tool-chemical-analyzer', 'tool-lockpick'],
+    chapter: 4,
+    prerequisites: ['case-003'],
+    rewards: {
+      tools: ['tool-magnifier-pro', 'tool-uv-light-advanced', 'tool-chemical-analyzer', 'tool-lockpick', 'tool-recorder'],
+      unlocksCases: [],
+      sanityBonus: 50,
+      description: '解锁星辰裁决所的全部秘密，获得终极工具套装'
+    },
+    timeLimit: {
+      totalSeconds: 2000,
+      sceneSwitchCost: 15,
+      searchAttemptCost: 8,
+      failedSearchPenalty: 30,
+      clueAnalysisCost: 15,
+      specialEventBonus: 90
+    },
+    branchRewards: {
+      'truth': {
+        tools: ['tool-magnifier-pro', 'tool-uv-light-advanced'],
+        unlocksCases: [],
+        sanityBonus: 30,
+        description: '真相结局奖励'
+      },
+      'eternal': {
+        tools: ['tool-chemical-analyzer', 'tool-lockpick'],
+        unlocksCases: [],
+        sanityBonus: 60,
+        description: '永恒结局奖励：你做出了超越人类的选择'
+      }
+    },
+    scenes: [],
+    clues: [],
+    conclusion: {
+      correctAnswer: 'conclusion-eternal-vigil',
+      evidence: [],
+      sanityThreshold: 60,
+      options: [
+        {
+          id: 'conclusion-join',
+          text: '加入星辰裁决所，成为人类的守护者',
+          isCorrect: false,
+          sanityCost: 25,
+          feedback: '你选择了成为守护者，但这并非终点...',
+          branch: 'truth'
+        },
+        {
+          id: 'conclusion-expose',
+          text: '将真相公之于众，让人类自己选择命运',
+          isCorrect: false,
+          sanityCost: 35,
+          feedback: '真相有时比谎言更危险...',
+          branch: 'truth'
+        },
+        {
+          id: 'conclusion-eternal-vigil',
+          text: '接受古老契约，成为超越时间的永恒守望者',
+          isCorrect: true,
+          sanityCost: 50,
+          feedback: '你理解了裁决所存在的真正意义——不是对抗，而是守望。在时间之外，你将永远注视着人类的命运...',
+          requiredTools: ['tool-uv-light-advanced', 'tool-chemical-analyzer'],
+          branch: 'eternal'
+        }
+      ]
+    }
+  },
+  {
+    id: 'case-secret-origins',
+    title: '起源回响',
+    description: '【三周目隐藏案件】时间循环的裂隙中，你看到了一切的起点。第一个调查员，第一宗超自然案件，以及那场改变了人类命运的古老契约...',
+    difficulty: 'hard',
+    status: 'locked',
+    sanityCost: 60,
+    recommendedSanity: 100,
+    startingTools: ['tool-magnifier-pro', 'tool-fingerprint-kit', 'tool-uv-light-advanced', 'tool-recorder', 'tool-chemical-analyzer', 'tool-lockpick'],
+    chapter: 0,
+    prerequisites: ['case-001'],
+    rewards: {
+      tools: [],
+      unlocksCases: [],
+      sanityBonus: 100,
+      description: '起源之谜的终极奖励'
+    },
+    timeLimit: {
+      totalSeconds: 2500,
+      sceneSwitchCost: 18,
+      searchAttemptCost: 10,
+      failedSearchPenalty: 35,
+      clueAnalysisCost: 18,
+      specialEventBonus: 120
+    },
+    branchRewards: {},
+    scenes: [],
+    clues: [],
+    conclusion: {
+      correctAnswer: 'conclusion-original-covenant',
+      evidence: [],
+      sanityThreshold: 70,
+      options: [
+        {
+          id: 'conclusion-break-cycle',
+          text: '打破时间循环，让一切重新开始',
+          isCorrect: false,
+          sanityCost: 40,
+          feedback: '循环已被打破...但新的故事将如何展开？'
+        },
+        {
+          id: 'conclusion-original-covenant',
+          text: '继承第一位调查员的意志，延续永恒的契约',
+          isCorrect: true,
+          sanityCost: 70,
+          feedback: '你终于理解了一切的起源。那个古老的契约不是诅咒，而是一份沉重的责任。而你，选择了承担。',
+          branch: 'deep-truth'
+        }
+      ]
+    }
   }
 ])
 
