@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueComparison, CredibilityMark, CredibilityLevel } from '@/types'
+import { CREDIBILITY_LEVELS } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -118,7 +119,10 @@ export const useGameStore = defineStore('game', () => {
     craftingHistory: [],
     intelligenceState: createInitialIntelligenceState(),
     mailDeliveryEvents: [],
-    spiritualPollution: createInitialPollutionState()
+    spiritualPollution: createInitialPollutionState(),
+    annotations: [],
+    comparisons: [],
+    credibilityMarks: []
   })
 
   const currentCase = computed(() => {
@@ -270,7 +274,10 @@ export const useGameStore = defineStore('game', () => {
       craftingHistory: [],
       intelligenceState: createInitialIntelligenceState(),
       mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents)),
-      spiritualPollution: createInitialPollutionState()
+      spiritualPollution: createInitialPollutionState(),
+      annotations: [],
+      comparisons: [],
+      credibilityMarks: []
     }
 
     startTimer()
@@ -2311,9 +2318,170 @@ export const useGameStore = defineStore('game', () => {
       craftingHistory: [],
       intelligenceState: createInitialIntelligenceState(),
       mailDeliveryEvents: [],
-      spiritualPollution: createInitialPollutionState()
+      spiritualPollution: createInitialPollutionState(),
+      annotations: [],
+      comparisons: [],
+      credibilityMarks: []
     }
   }
+
+  function addAnnotation(clueId: string, content: string, type: ClueAnnotation['type'] = 'note'): ClueAnnotation {
+    const annotation: ClueAnnotation = {
+      id: `ann-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      clueId,
+      content,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      type
+    }
+    gameState.value.annotations.push(annotation)
+    addLog('analysis', `添加批注[${type}]：${content.slice(0, 30)}`)
+    return annotation
+  }
+
+  function removeAnnotation(annotationId: string) {
+    gameState.value.annotations = gameState.value.annotations.filter(a => a.id !== annotationId)
+  }
+
+  function updateAnnotation(annotationId: string, content: string) {
+    const ann = gameState.value.annotations.find(a => a.id === annotationId)
+    if (ann) {
+      ann.content = content
+      ann.updatedAt = Date.now()
+    }
+  }
+
+  function getAnnotationsForClue(clueId: string): ClueAnnotation[] {
+    return gameState.value.annotations.filter(a => a.clueId === clueId)
+  }
+
+  function compareClues(clue1Id: string, clue2Id: string, notes: string = ''): ClueComparison {
+    const existing = gameState.value.comparisons.find(
+      c => (c.clue1Id === clue1Id && c.clue2Id === clue2Id) ||
+           (c.clue1Id === clue2Id && c.clue2Id === clue1Id)
+    )
+    if (existing) {
+      existing.notes = notes || existing.notes
+      existing.createdAt = Date.now()
+      return existing
+    }
+
+    const caseData = currentCase.value
+    const clue1 = caseData?.clues.find(c => c.id === clue1Id)
+    const clue2 = caseData?.clues.find(c => c.id === clue2Id)
+
+    let similarity = 0
+    let conflict = false
+
+    if (clue1 && clue2) {
+      const sharedConnections = clue1.connections.filter(id => clue2.connections.includes(id))
+      similarity = Math.min(100, Math.round((sharedConnections.length / Math.max(clue1.connections.length, clue2.connections.length, 1)) * 100))
+
+      if (clue1.type === clue2.type && clue1.source !== clue2.source) {
+        similarity += 10
+      }
+      if (clue1.importance >= 4 && clue2.importance >= 4) {
+        similarity += 15
+      }
+
+      const isFake1 = isFakeClue(clue1Id)
+      const isFake2 = isFakeClue(clue2Id)
+      if (isFake1 || isFake2) {
+        conflict = true
+        similarity = Math.max(0, similarity - 30)
+      }
+
+      const mark1 = gameState.value.credibilityMarks.find(m => m.clueId === clue1Id)
+      const mark2 = gameState.value.credibilityMarks.find(m => m.clueId === clue2Id)
+      if (mark1 && mark2) {
+        if ((mark1.level === 'verified' && mark2.level === 'contradicted') ||
+            (mark1.level === 'contradicted' && mark2.level === 'verified')) {
+          conflict = true
+          similarity = Math.max(0, similarity - 40)
+        }
+      }
+    }
+
+    similarity = Math.min(100, similarity)
+
+    const comparison: ClueComparison = {
+      id: `cmp-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      clue1Id,
+      clue2Id,
+      similarity,
+      conflict,
+      notes,
+      createdAt: Date.now()
+    }
+    gameState.value.comparisons.push(comparison)
+    addLog('analysis', `比对线索：${clue1Id} ↔ ${clue2Id}（相似度 ${similarity}%${conflict ? '，存在矛盾' : ''}）`)
+    updateDeductionCompleteness()
+    return comparison
+  }
+
+  function getComparisonsForClue(clueId: string): ClueComparison[] {
+    return gameState.value.comparisons.filter(
+      c => c.clue1Id === clueId || c.clue2Id === clueId
+    )
+  }
+
+  function setCredibilityMark(clueId: string, level: CredibilityLevel, reason?: string): CredibilityMark {
+    const existing = gameState.value.credibilityMarks.find(m => m.clueId === clueId)
+    if (existing) {
+      existing.level = level
+      existing.markedAt = Date.now()
+      existing.reason = reason
+      addLog('analysis', `更新可信度：${clueId} → ${CREDIBILITY_LEVELS[level].description}${reason ? `（${reason}）` : ''}`)
+    } else {
+      const mark: CredibilityMark = {
+        clueId,
+        level,
+        markedAt: Date.now(),
+        reason
+      }
+      gameState.value.credibilityMarks.push(mark)
+      addLog('analysis', `标记可信度：${clueId} → ${CREDIBILITY_LEVELS[level].description}${reason ? `（${reason}）` : ''}`)
+    }
+    updateDeductionCompleteness()
+    return gameState.value.credibilityMarks.find(m => m.clueId === clueId)!
+  }
+
+  function getCredibilityMark(clueId: string): CredibilityMark | undefined {
+    return gameState.value.credibilityMarks.find(m => m.clueId === clueId)
+  }
+
+  function getCredibilityLevel(clueId: string): CredibilityLevel {
+    const mark = getCredibilityMark(clueId)
+    return mark?.level || 'uncertain'
+  }
+
+  function getConnectionSuccessModifier(clue1Id: string, clue2Id: string): number {
+    const level1 = getCredibilityLevel(clue1Id)
+    const level2 = getCredibilityLevel(clue2Id)
+    const effect1 = CREDIBILITY_LEVELS[level1]
+    const effect2 = CREDIBILITY_LEVELS[level2]
+    return effect1.connectionSuccessModifier + effect2.connectionSuccessModifier
+  }
+
+  function getTotalDeductionHintBonus(): number {
+    return gameState.value.credibilityMarks.reduce((sum, mark) => {
+      return sum + CREDIBILITY_LEVELS[mark.level].deductionHintBonus
+    }, 0)
+  }
+
+  function getVerifiedClueCount(): number {
+    return gameState.value.credibilityMarks.filter(m => m.level === 'verified' || m.level === 'reliable').length
+  }
+
+  function getSuspectClueCount(): number {
+    return gameState.value.credibilityMarks.filter(m => m.level === 'suspect' || m.level === 'contradicted').length
+  }
+
+  const modifiedDeductionInfoCompleteness = computed(() => {
+    const base = gameState.value.intelligenceState.deductionInfoCompleteness
+    const hintBonus = getTotalDeductionHintBonus()
+    return Math.min(100, Math.max(0, base + hintBonus))
+  })
 
   return {
     gameState,
@@ -2343,6 +2511,7 @@ export const useGameStore = defineStore('game', () => {
     nextPhase,
     overallProgress,
     deductionInfoCompleteness,
+    modifiedDeductionInfoCompleteness,
     spiritualPollution,
     totalPollution,
     shockTier,
@@ -2418,6 +2587,19 @@ export const useGameStore = defineStore('game', () => {
     checkSceneUnlockConditions,
     checkSceneUnlockConditionsForAll,
     getSceneUnlockConditionProgress,
-    resetGame
+    resetGame,
+    addAnnotation,
+    removeAnnotation,
+    updateAnnotation,
+    getAnnotationsForClue,
+    compareClues,
+    getComparisonsForClue,
+    setCredibilityMark,
+    getCredibilityMark,
+    getCredibilityLevel,
+    getConnectionSuccessModifier,
+    getTotalDeductionHintBonus,
+    getVerifiedClueCount,
+    getSuspectClueCount
   }
 })

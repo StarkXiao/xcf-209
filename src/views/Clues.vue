@@ -3,7 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
-import type { Clue, ClueConnection } from '@/types'
+import type { Clue, ClueConnection, CredibilityLevel, ClueAnnotation } from '@/types'
+import { CREDIBILITY_LEVELS, ANNOTATION_TYPE_ICONS } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,6 +20,13 @@ const analysisBonusInfo = ref<{
   sanitySaved: number
   extraInsight: string | null
 } | null>(null)
+
+const newAnnotationContent = ref('')
+const newAnnotationType = ref<ClueAnnotation['type']>('note')
+const comparingClueId = ref<string | null>(null)
+const comparisonNotes = ref('')
+const showCredibilitySelector = ref(false)
+const credibilityReason = ref('')
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -188,6 +196,60 @@ function disproveClue(clueId: string) {
     }
   }
 }
+
+function addAnnotationToClue() {
+  if (!selectedClue.value || !newAnnotationContent.value.trim()) return
+  gameStore.addAnnotation(selectedClue.value.id, newAnnotationContent.value.trim(), newAnnotationType.value)
+  newAnnotationContent.value = ''
+}
+
+function deleteAnnotation(annotationId: string) {
+  gameStore.removeAnnotation(annotationId)
+}
+
+function getAnnotationsForSelectedClue() {
+  if (!selectedClue.value) return []
+  return gameStore.getAnnotationsForClue(selectedClue.value.id)
+}
+
+function executeCompare() {
+  if (!selectedClue.value || !comparingClueId.value) return
+  gameStore.compareClues(selectedClue.value.id, comparingClueId.value, comparisonNotes.value)
+  comparingClueId.value = null
+  comparisonNotes.value = ''
+}
+
+function getComparisonsForSelectedClue() {
+  if (!selectedClue.value) return []
+  return gameStore.getComparisonsForClue(selectedClue.value.id)
+}
+
+function getOtherClueName(clueId: string) {
+  return getClueById(clueId)?.name || clueId
+}
+
+function setClueCredibility(level: CredibilityLevel) {
+  if (!selectedClue.value) return
+  gameStore.setCredibilityMark(selectedClue.value.id, level, credibilityReason.value || undefined)
+  showCredibilitySelector.value = false
+  credibilityReason.value = ''
+}
+
+function getCredibilityInfo(clueId: string) {
+  const level = gameStore.getCredibilityLevel(clueId)
+  return CREDIBILITY_LEVELS[level]
+}
+
+function getCredibilityColor(level: CredibilityLevel): string {
+  const colors: Record<CredibilityLevel, string> = {
+    verified: '#4caf50',
+    reliable: '#2196f3',
+    uncertain: '#9e9e9e',
+    suspect: '#ff9800',
+    contradicted: '#f44336'
+  }
+  return colors[level]
+}
 </script>
 
 <template>
@@ -235,6 +297,12 @@ function disproveClue(clueId: string) {
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
                   <span v-if="isFakeClue(clue.id)" class="fake-badge">👻 幻觉</span>
+                  <span v-else-if="gameStore.getCredibilityLevel(clue.id) !== 'uncertain'"
+                    class="credibility-mini-badge"
+                    :style="{ backgroundColor: getCredibilityColor(gameStore.getCredibilityLevel(clue.id)) }"
+                  >
+                    {{ getCredibilityInfo(clue.id).description }}
+                  </span>
                   <span v-else 
                     class="importance-badge"
                     :style="{ backgroundColor: getImportanceColor(clue.importance) }"
@@ -243,6 +311,9 @@ function disproveClue(clueId: string) {
                   </span>
                 </div>
                 <div class="clue-type">{{ clue.type }}</div>
+                <div v-if="gameStore.getAnnotationsForClue(clue.id).length > 0" class="annotation-count">
+                  📝 {{ gameStore.getAnnotationsForClue(clue.id).length }}
+                </div>
               </div>
             </div>
           </div>
@@ -265,6 +336,12 @@ function disproveClue(clueId: string) {
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
                   <span v-if="isFakeClue(clue.id)" class="fake-badge">👻 幻觉</span>
+                  <span v-else-if="gameStore.getCredibilityLevel(clue.id) !== 'uncertain'"
+                    class="credibility-mini-badge"
+                    :style="{ backgroundColor: getCredibilityColor(gameStore.getCredibilityLevel(clue.id)) }"
+                  >
+                    {{ getCredibilityInfo(clue.id).description }}
+                  </span>
                   <span v-else class="analyzed-badge">✓</span>
                 </div>
                 <div class="clue-type">{{ clue.type }}</div>
@@ -324,6 +401,154 @@ function disproveClue(clueId: string) {
                   >
                     <span class="conn-icon">🔗</span>
                     <span>{{ getClueById(conn.clue1Id === selectedClue.id ? conn.clue2Id : conn.clue1Id)?.name }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <h4>可信度标记</h4>
+                <div class="credibility-section">
+                  <div class="current-credibility">
+                    <span class="credibility-label">当前标记:</span>
+                    <span 
+                      class="credibility-badge"
+                      :style="{ backgroundColor: getCredibilityColor(gameStore.getCredibilityLevel(selectedClue.id)) }"
+                    >
+                      {{ getCredibilityInfo(selectedClue.id).description }}
+                    </span>
+                    <span v-if="gameStore.getCredibilityMark(selectedClue.id)?.reason" class="credibility-reason">
+                      — {{ gameStore.getCredibilityMark(selectedClue.id)?.reason }}
+                    </span>
+                  </div>
+                  <div class="credibility-effects">
+                    <span class="effect-item" :class="getCredibilityInfo(selectedClue.id).connectionSuccessModifier >= 0 ? 'positive' : 'negative'">
+                      连线修正: {{ getCredibilityInfo(selectedClue.id).connectionSuccessModifier >= 0 ? '+' : '' }}{{ Math.round(getCredibilityInfo(selectedClue.id).connectionSuccessModifier * 100) }}%
+                    </span>
+                    <span class="effect-item" :class="getCredibilityInfo(selectedClue.id).deductionHintBonus >= 0 ? 'positive' : 'negative'">
+                      推演修正: {{ getCredibilityInfo(selectedClue.id).deductionHintBonus >= 0 ? '+' : '' }}{{ getCredibilityInfo(selectedClue.id).deductionHintBonus }}%
+                    </span>
+                  </div>
+                  <div class="credibility-actions">
+                    <button class="credibility-btn" @click="showCredibilitySelector = !showCredibilitySelector">
+                      🏷️ 标记可信度
+                    </button>
+                  </div>
+                  <transition name="fade">
+                    <div v-if="showCredibilitySelector" class="credibility-selector">
+                      <div class="credibility-options">
+                        <button 
+                          v-for="(effect, level) in CREDIBILITY_LEVELS" 
+                          :key="level"
+                          class="credibility-option"
+                          :class="{ active: gameStore.getCredibilityLevel(selectedClue.id) === level }"
+                          :style="{ borderColor: getCredibilityColor(level as CredibilityLevel) }"
+                          @click="setClueCredibility(level as CredibilityLevel)"
+                        >
+                          <span class="option-dot" :style="{ backgroundColor: getCredibilityColor(level as CredibilityLevel) }"></span>
+                          <span class="option-name">{{ effect.description }}</span>
+                          <span class="option-modifier">{{ effect.connectionSuccessModifier >= 0 ? '+' : '' }}{{ Math.round(effect.connectionSuccessModifier * 100) }}% 连线</span>
+                        </button>
+                      </div>
+                      <input 
+                        v-model="credibilityReason" 
+                        class="credibility-reason-input" 
+                        placeholder="标记原因（可选）"
+                      />
+                    </div>
+                  </transition>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <h4>批注 <span class="annotation-count-header">({{ getAnnotationsForSelectedClue().length }})</span></h4>
+                <div class="annotations-list">
+                  <div v-if="getAnnotationsForSelectedClue().length === 0" class="no-annotations">
+                    暂无批注
+                  </div>
+                  <div 
+                    v-for="ann in getAnnotationsForSelectedClue()" 
+                    :key="ann.id" 
+                    class="annotation-item"
+                  >
+                    <div class="annotation-header">
+                      <span class="annotation-type-icon">{{ ANNOTATION_TYPE_ICONS[ann.type] }}</span>
+                      <span class="annotation-time">{{ new Date(ann.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
+                      <button class="annotation-delete" @click="deleteAnnotation(ann.id)">✕</button>
+                    </div>
+                    <div class="annotation-content">{{ ann.content }}</div>
+                  </div>
+                </div>
+                <div class="annotation-input">
+                  <div class="annotation-type-selector">
+                    <button 
+                      v-for="(icon, type) in ANNOTATION_TYPE_ICONS" 
+                      :key="type"
+                      class="type-btn"
+                      :class="{ active: newAnnotationType === type }"
+                      @click="newAnnotationType = type as ClueAnnotation['type']"
+                    >
+                      {{ icon }}
+                    </button>
+                  </div>
+                  <div class="annotation-input-row">
+                    <input 
+                      v-model="newAnnotationContent" 
+                      class="annotation-text-input"
+                      placeholder="添加批注..."
+                      @keyup.enter="addAnnotationToClue"
+                    />
+                    <button class="annotation-add-btn" @click="addAnnotationToClue" :disabled="!newAnnotationContent.trim()">+</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <h4>线索比对</h4>
+                <div class="comparison-section">
+                  <div v-if="comparingClueId" class="compare-active">
+                    <span class="compare-info">与 <strong>{{ getClueById(comparingClueId)?.name }}</strong> 比对</span>
+                    <button class="compare-cancel-btn" @click="comparingClueId = null">取消</button>
+                  </div>
+                  <div v-else class="compare-select">
+                    <select v-model="comparingClueId" class="compare-select-input">
+                      <option :value="null" disabled>选择比对目标...</option>
+                      <option 
+                        v-for="clue in discoveredClues.filter(c => c.id !== selectedClue?.id)" 
+                        :key="clue.id" 
+                        :value="clue.id"
+                      >
+                        {{ clue.name }}
+                      </option>
+                    </select>
+                  </div>
+                  <textarea 
+                    v-if="comparingClueId"
+                    v-model="comparisonNotes" 
+                    class="compare-notes"
+                    placeholder="比对备注..."
+                    rows="2"
+                  ></textarea>
+                  <button 
+                    v-if="comparingClueId"
+                    class="compare-execute-btn"
+                    @click="executeCompare"
+                  >
+                    🔍 执行比对
+                  </button>
+                  <div v-if="getComparisonsForSelectedClue().length > 0" class="comparison-results">
+                    <div 
+                      v-for="cmp in getComparisonsForSelectedClue()" 
+                      :key="cmp.id" 
+                      class="comparison-item"
+                      :class="{ conflict: cmp.conflict }"
+                    >
+                      <div class="comparison-header">
+                        <span class="comparison-target">↔ {{ getOtherClueName(cmp.clue1Id === selectedClue.id ? cmp.clue2Id : cmp.clue1Id) }}</span>
+                        <span class="comparison-similarity">相似度: {{ cmp.similarity }}%</span>
+                      </div>
+                      <div v-if="cmp.conflict" class="comparison-conflict">⚠️ 存在矛盾</div>
+                      <div v-if="cmp.notes" class="comparison-notes-text">{{ cmp.notes }}</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -980,6 +1205,408 @@ function disproveClue(clueId: string) {
   color: #ce93d8;
   font-size: 0.9rem;
   font-style: italic;
+}
+
+.credibility-mini-badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 8px;
+  color: white;
+  font-weight: bold;
+}
+
+.annotation-count {
+  font-size: 0.7rem;
+  color: var(--color-accent-light);
+  margin-top: 0.2rem;
+}
+
+.annotation-count-header {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  font-weight: normal;
+}
+
+.credibility-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.current-credibility {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.credibility-label {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.credibility-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 10px;
+  color: white;
+  font-weight: bold;
+}
+
+.credibility-reason {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+.credibility-effects {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.effect-item {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.effect-item.positive {
+  color: var(--color-success);
+  background: rgba(58, 139, 90, 0.1);
+}
+
+.effect-item.negative {
+  color: var(--color-danger);
+  background: rgba(139, 58, 58, 0.1);
+}
+
+.credibility-actions {
+  display: flex;
+}
+
+.credibility-btn {
+  padding: 0.35rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.credibility-btn:hover {
+  border-color: var(--color-accent);
+  background: rgba(107, 76, 154, 0.15);
+}
+
+.credibility-selector {
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.credibility-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.credibility-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.credibility-option:hover {
+  background: rgba(107, 76, 154, 0.15);
+}
+
+.credibility-option.active {
+  background: rgba(107, 76, 154, 0.25);
+  box-shadow: 0 0 8px rgba(107, 76, 154, 0.2);
+}
+
+.option-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.option-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.option-modifier {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+}
+
+.credibility-reason-input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.credibility-reason-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.annotations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.no-annotations {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.annotation-item {
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-accent);
+}
+
+.annotation-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.annotation-type-icon {
+  font-size: 0.85rem;
+}
+
+.annotation-time {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  flex: 1;
+}
+
+.annotation-delete {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+.annotation-delete:hover {
+  color: var(--color-danger);
+  background: rgba(139, 58, 58, 0.1);
+}
+
+.annotation-content {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.annotation-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.annotation-type-selector {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.type-btn {
+  padding: 0.2rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s ease;
+}
+
+.type-btn.active {
+  border-color: var(--color-accent);
+  background: rgba(107, 76, 154, 0.2);
+}
+
+.annotation-input-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.annotation-text-input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.annotation-text-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.annotation-add-btn {
+  padding: 0.4rem 0.7rem;
+  background: var(--color-accent);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: bold;
+}
+
+.annotation-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.comparison-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.compare-active {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  border-radius: 6px;
+}
+
+.compare-info {
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.compare-cancel-btn {
+  padding: 0.2rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.compare-select-input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.compare-notes {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.compare-notes:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.compare-execute-btn {
+  padding: 0.4rem 0.75rem;
+  background: var(--color-accent);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.comparison-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.comparison-item {
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.comparison-item.conflict {
+  border-color: var(--color-danger);
+  background: rgba(139, 58, 58, 0.08);
+}
+
+.comparison-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.comparison-target {
+  font-size: 0.85rem;
+  color: var(--color-text);
+}
+
+.comparison-similarity {
+  font-size: 0.8rem;
+  color: var(--color-accent-light);
+  font-weight: bold;
+}
+
+.comparison-conflict {
+  font-size: 0.8rem;
+  color: var(--color-danger);
+  font-weight: bold;
+}
+
+.comparison-notes-text {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  font-style: italic;
+  margin-top: 0.25rem;
 }
 
 @media (max-width: 1024px) {

@@ -2,13 +2,15 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useClueGraphStore } from '@/stores/clueGraph'
+import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
 import { RELATIONSHIP_TYPES } from '@/types'
-import type { GraphNode, GraphEdge, RelationshipType } from '@/types'
+import type { GraphNode, GraphEdge, RelationshipType, CredibilityLevel } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
 const clueGraphStore = useClueGraphStore()
+const gameStore = useGameStore()
 
 const canvasRef = ref<HTMLDivElement | null>(null)
 const svgRef = ref<SVGSVGElement | null>(null)
@@ -435,6 +437,34 @@ function getNodeBorderColor(node: GraphNode): string {
   if (node.id === connectionTargetId.value) return '#4caf50'
   return node.color || '#6b4c9a'
 }
+
+function getNodeCredibilityLevel(nodeId: string): CredibilityLevel {
+  return gameStore.getCredibilityLevel(nodeId)
+}
+
+function getNodeCredibilityColor(nodeId: string): string {
+  const level = getNodeCredibilityLevel(nodeId)
+  const colors: Record<CredibilityLevel, string> = {
+    verified: '#4caf50',
+    reliable: '#2196f3',
+    uncertain: 'transparent',
+    suspect: '#ff9800',
+    contradicted: '#f44336'
+  }
+  return colors[level]
+}
+
+function getNodeAnnotationCount(nodeId: string): number {
+  return gameStore.getAnnotationsForClue(nodeId).length
+}
+
+function getConnectionModifierDisplay(sourceId: string, targetId: string): string {
+  const modifier = gameStore.getConnectionSuccessModifier(sourceId, targetId)
+  const pct = Math.round(modifier * 100)
+  if (pct > 0) return `+${pct}%`
+  if (pct < 0) return `${pct}%`
+  return '±0%'
+}
 </script>
 
 <template>
@@ -626,9 +656,17 @@ function getNodeBorderColor(node: GraphNode): string {
               <div class="node-header" :style="{ backgroundColor: node.color }">
                 <span class="node-type">{{ getNodeTypeLabel(node.type) }}</span>
                 <span v-if="node.importance" class="node-importance">{{ node.importance }}</span>
+                <span 
+                  v-if="getNodeCredibilityLevel(node.id) !== 'uncertain'"
+                  class="node-credibility-dot"
+                  :style="{ backgroundColor: getNodeCredibilityColor(node.id) }"
+                ></span>
               </div>
               <div class="node-body">
                 <div class="node-title">{{ node.label }}</div>
+                <div v-if="getNodeAnnotationCount(node.id) > 0" class="node-annotation-count">
+                  📝 {{ getNodeAnnotationCount(node.id) }}
+                </div>
               </div>
               <div class="node-actions">
                 <button 
@@ -797,6 +835,15 @@ function getNodeBorderColor(node: GraphNode): string {
                 <span class="detail-label">状态</span>
                 <span class="detail-value" :class="selectedEdge?.confirmed ? 'confirmed' : 'unconfirmed'">
                   {{ selectedEdge?.confirmed ? '✓ 已确认' : '⏳ 待确认' }}
+                </span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">可信度修正</span>
+                <span 
+                  class="detail-value"
+                  :class="gameStore.getConnectionSuccessModifier(selectedEdge?.sourceId || '', selectedEdge?.targetId || '') > 0 ? 'confirmed' : gameStore.getConnectionSuccessModifier(selectedEdge?.sourceId || '', selectedEdge?.targetId || '') < 0 ? 'unconfirmed' : ''"
+                >
+                  {{ getConnectionModifierDisplay(selectedEdge?.sourceId || '', selectedEdge?.targetId || '') }} 连线成功率
                 </span>
               </div>
               <div v-if="selectedEdge?.isError" class="detail-row full">
@@ -1153,6 +1200,19 @@ function getRelationshipIcon(rel: string): string {
   padding: 0.1rem 0.35rem;
   border-radius: 8px;
   font-size: 0.65rem;
+}
+
+.node-credibility-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.node-annotation-count {
+  font-size: 0.65rem;
+  color: var(--color-accent-light);
+  margin-top: 0.1rem;
 }
 
 .node-body {

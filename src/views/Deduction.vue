@@ -62,7 +62,7 @@ function getRiskColor(level: string): string {
 }
 
 const intelligenceCompleteness = computed(() => {
-  return gameStore.deductionInfoCompleteness
+  return gameStore.modifiedDeductionInfoCompleteness
 })
 
 const completenessLevel = computed(() => {
@@ -641,6 +641,33 @@ function disproveOption(optionId: string) {
                   <span class="branch-desc">{{ getBranchInfo(branchId).description }}</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div v-if="gameStore.gameState.credibilityMarks.length > 0 || gameStore.gameState.comparisons.length > 0" class="credibility-summary-section">
+            <h4>线索分析状态</h4>
+            <div class="credibility-summary-grid">
+              <div class="credibility-stat">
+                <span class="credibility-stat-label">已验证</span>
+                <span class="credibility-stat-value verified">{{ gameStore.getVerifiedClueCount() }}</span>
+              </div>
+              <div class="credibility-stat">
+                <span class="credibility-stat-label">可疑</span>
+                <span class="credibility-stat-value suspect">{{ gameStore.getSuspectClueCount() }}</span>
+              </div>
+              <div class="credibility-stat">
+                <span class="credibility-stat-label">比对次数</span>
+                <span class="credibility-stat-value">{{ gameStore.gameState.comparisons.length }}</span>
+              </div>
+              <div class="credibility-stat">
+                <span class="credibility-stat-label">批注数</span>
+                <span class="credibility-stat-value">{{ gameStore.gameState.annotations.length }}</span>
+              </div>
+            </div>
+            <div v-if="gameStore.getTotalDeductionHintBonus() !== 0" class="credibility-bonus-info">
+              <span :class="gameStore.getTotalDeductionHintBonus() > 0 ? 'bonus-positive' : 'bonus-negative'">
+                🏷️ 可信度推演修正: {{ gameStore.getTotalDeductionHintBonus() > 0 ? '+' : '' }}{{ gameStore.getTotalDeductionHintBonus() }}%
+              </span>
             </div>
           </div>
         </div>
@@ -1262,6 +1289,74 @@ function disproveOption(optionId: string) {
 .branch-desc {
   font-size: 0.75rem;
   color: var(--color-text-dim);
+}
+
+.credibility-summary-section {
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.credibility-summary-section h4 {
+  color: var(--color-text);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.credibility-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.credibility-stat {
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.credibility-stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+
+.credibility-stat-value {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--color-text);
+}
+
+.credibility-stat-value.verified {
+  color: var(--color-success);
+}
+
+.credibility-stat-value.suspect {
+  color: #ff9800;
+}
+
+.credibility-bonus-info {
+  padding: 0.5rem;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.bonus-positive {
+  color: var(--color-success);
+  background: rgba(58, 139, 90, 0.1);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+}
+
+.bonus-negative {
+  color: var(--color-danger);
+  background: rgba(139, 58, 58, 0.1);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
 }
 
 .conclusion-panel {
