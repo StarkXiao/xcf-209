@@ -273,13 +273,17 @@ function formatCaseTime(seconds: number): string {
     <div class="investigator-tips card">
       <h3 class="tips-title">📋 调查员提示</h3>
       <ul class="tips-list">
+        <li><strong>⚡ 短期惊吓</strong>：突然的恐怖冲击，随时间会自然平复</li>
+        <li><strong>🕳️ 长期侵蚀</strong>：禁忌知识在灵魂上刻下的印记，极难消除，会永久降低能力</li>
         <li>理智值是调查员最重要的资源，请谨慎管理</li>
         <li>某些证据会降低理智值，但可能包含关键信息</li>
+        <li>侵蚀达到阈值会触发<strong>精神污染里程碑</strong>，带来持续性负面影响</li>
+        <li><strong>⚠️ 存档风险</strong>：高污染状态下存档可能导致数据损坏或精神干扰</li>
+        <li>污染程度会影响最终<strong>结局走向</strong>——追寻真相或堕入深渊？</li>
         <li>线索之间可能存在关联，尝试将它们连接起来</li>
         <li>完成案件后可以解锁新的案件章节</li>
         <li>使用特殊工具发现隐藏证据，可以解锁深层推演分支</li>
         <li>解锁深层真相后，可获得继承工具奖励，在 New Game+ 中使用</li>
-        <li>完成案件获得的工具会自动带入后续案件</li>
       </ul>
     </div>
   </div>

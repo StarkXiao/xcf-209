@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -21,6 +21,17 @@ import {
   createInitialIntelligenceState,
   mailDeliveryEvents
 } from '@/data/mailSystem'
+import {
+  createInitialPollutionState,
+  getTotalPollution,
+  getShockTier,
+  getErosionTier,
+  getMilestoneEffects,
+  calculatePollutionFromSanityLoss,
+  calculateDecay,
+  determineEndingAlignment,
+  CORRUPTION_MILESTONES
+} from '@/data/spiritualPollution'
 
 let timerInterval: ReturnType<typeof setInterval> | null = null
 
@@ -105,7 +116,8 @@ export const useGameStore = defineStore('game', () => {
     unlockedRecipes: [],
     craftingHistory: [],
     intelligenceState: createInitialIntelligenceState(),
-    mailDeliveryEvents: []
+    mailDeliveryEvents: [],
+    spiritualPollution: createInitialPollutionState()
   })
 
   const currentCase = computed(() => {
@@ -152,6 +164,32 @@ export const useGameStore = defineStore('game', () => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  })
+
+  const spiritualPollution = computed(() => gameState.value.spiritualPollution)
+
+  const totalPollution = computed(() => getTotalPollution(gameState.value.spiritualPollution))
+
+  const shockTier = computed(() => getShockTier(gameState.value.spiritualPollution.shortTermShock))
+
+  const erosionTier = computed(() => getErosionTier(gameState.value.spiritualPollution.longTermErosion))
+
+  const milestoneEffects = computed(() => getMilestoneEffects(gameState.value.spiritualPollution))
+
+  const effectiveMaxSanity = computed(() => {
+    const baseMax = gameState.value.maxSanity
+    const reduction = milestoneEffects.value.maxSanityReduction
+    return Math.max(10, baseMax - reduction)
+  })
+
+  const shockPercentage = computed(() => {
+    const state = gameState.value.spiritualPollution
+    return (state.shortTermShock / state.maxShortTermShock) * 100
+  })
+
+  const erosionPercentage = computed(() => {
+    const state = gameState.value.spiritualPollution
+    return (state.longTermErosion / state.maxLongTermErosion) * 100
   })
 
   function startCase(caseId: string, inheritedTools?: string[]) {
@@ -227,7 +265,8 @@ export const useGameStore = defineStore('game', () => {
       unlockedRecipes: [],
       craftingHistory: [],
       intelligenceState: createInitialIntelligenceState(),
-      mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents))
+      mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents)),
+      spiritualPollution: createInitialPollutionState()
     }
 
     startTimer()
@@ -259,7 +298,111 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
 
-  function modifySanity(amount: number, reason: string) {
+  function addPollution(
+    shockAmount: number, 
+    erosionAmount: number, 
+    source: PollutionSource, 
+    description: string
+  ) {
+    const state = gameState.value.spiritualPollution
+    const prevErosion = state.longTermErosion
+    
+    const actualShock = Math.max(0, Math.min(state.maxShortTermShock - state.shortTermShock, shockAmount))
+    const actualErosion = Math.max(0, Math.min(state.maxLongTermErosion - state.longTermErosion, erosionAmount))
+    
+    if (actualShock > 0) {
+      state.shortTermShock += actualShock
+    }
+    if (actualErosion > 0) {
+      state.longTermErosion += actualErosion
+    }
+    
+    if (actualShock > 0 || actualErosion > 0) {
+      const event: PollutionEvent = {
+        id: `pollution-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: actualShock > actualErosion ? 'short_term_shock' : 'long_term_erosion',
+        amount: actualShock + actualErosion,
+        source,
+        description,
+        timestamp: Date.now()
+      }
+      state.pollutionEvents.push(event)
+      
+      if (actualShock > 0 && actualErosion > 0) {
+        addLog('sanity_loss', `⚠️ 精神冲击：惊吓 +${actualShock}，侵蚀 +${actualErosion} - ${description}`)
+      } else if (actualShock > 0) {
+        addLog('sanity_loss', `⚡ 短期惊吓 +${actualShock}：${description}`)
+      } else if (actualErosion > 0) {
+        addLog('sanity_loss', `🕳️ 长期侵蚀 +${actualErosion}：${description}`)
+      }
+    }
+    
+    checkCorruptionMilestones(prevErosion)
+    checkLowSanityStreak()
+  }
+
+  function checkCorruptionMilestones(prevErosion: number) {
+    const state = gameState.value.spiritualPollution
+    
+    for (const milestone of CORRUPTION_MILESTONES) {
+      if (state.longTermErosion >= milestone.erosionThreshold && prevErosion < milestone.erosionThreshold) {
+        if (!state.unlockedCorruptionMilestones.includes(milestone.id)) {
+          state.unlockedCorruptionMilestones.push(milestone.id)
+          addLog('sanity_loss', `🔮 精神污染里程碑达成：${milestone.name}`)
+          addLog('sanity_loss', milestone.description)
+          
+          if (milestone.effects.maxSanityReduction) {
+            addLog('sanity_loss', `最大理智值上限降低 ${milestone.effects.maxSanityReduction} 点`)
+          }
+          if (milestone.effects.sanityRecoveryPenalty) {
+            addLog('sanity_loss', `理智恢复效率降低 ${milestone.effects.sanityRecoveryPenalty}%`)
+          }
+        }
+      }
+    }
+  }
+
+  function checkLowSanityStreak() {
+    const state = gameState.value.spiritualPollution
+    const sanityRatio = gameState.value.sanity / effectiveMaxSanity.value
+    
+    if (sanityRatio < 0.3) {
+      state.lowSanityStreak++
+      if (state.lowSanityStreak >= 3 && state.lowSanityStreak % 3 === 0) {
+        const erosionGain = Math.round(state.lowSanityStreak / 3)
+        addPollution(0, erosionGain, 'repeated_low_sanity', `连续${state.lowSanityStreak}次处于低理智状态，精神受到持续侵蚀`)
+      }
+    } else {
+      state.lowSanityStreak = 0
+    }
+  }
+
+  function decayPollution() {
+    const state = gameState.value.spiritualPollution
+    const now = Date.now()
+    const elapsed = now - state.lastDecayTime
+    
+    if (elapsed < 30000) return
+    
+    const { shockDecay, erosionDecay } = calculateDecay(
+      state, 
+      elapsed, 
+      gameState.value.sanity, 
+      gameState.value.maxSanity
+    )
+    
+    if (shockDecay > 0 || erosionDecay > 0) {
+      state.shortTermShock = Math.max(0, state.shortTermShock - shockDecay)
+      state.longTermErosion = Math.max(0, state.longTermErosion - erosionDecay)
+      state.lastDecayTime = now
+      
+      if (shockDecay > 5 || erosionDecay > 2) {
+        addLog('discovery', `🧘 精神状态平复：惊吓 -${shockDecay}，侵蚀 -${erosionDecay}`)
+      }
+    }
+  }
+
+  function modifySanity(amount: number, reason: string, sourceType: 'shock' | 'erosion' | 'mixed' = 'mixed') {
     let finalAmount = amount
     
     if (amount < 0) {
@@ -269,19 +412,41 @@ export const useGameStore = defineStore('game', () => {
       
       const actualLoss = Math.abs(finalAmount)
       addLog('sanity_loss', `理智值下降 ${actualLoss} 点（天赋减免 ${Math.abs(amount) - actualLoss} 点）：${reason}`)
+      
+      const pollution = calculatePollutionFromSanityLoss(actualLoss, sourceType)
+      const pollutionSource: PollutionSource = 
+        reason.includes('证据') || reason.includes('禁忌') ? 'evidence_sanity_loss' :
+        reason.includes('事件') ? 'scene_event' :
+        reason.includes('时间') ? 'time_out' :
+        reason.includes('推演') || reason.includes('结论') ? 'wrong_conclusion' :
+        'evidence_sanity_loss'
+      
+      addPollution(pollution.shock, pollution.erosion, pollutionSource, reason)
     } else if (amount > 0) {
       const recoveryBonus = talentEffects.value.sanityRecoveryBonus
-      const bonus = amount * (recoveryBonus / 100)
-      finalAmount = amount + bonus
+      const recoveryPenalty = milestoneEffects.value.sanityRecoveryPenalty
       
-      addLog('discovery', `理智值恢复 ${finalAmount} 点（天赋加成 ${bonus.toFixed(1)} 点）：${reason}`)
+      const bonus = amount * (recoveryBonus / 100)
+      const penalty = amount * (recoveryPenalty / 100)
+      finalAmount = amount + bonus - penalty
+      finalAmount = Math.max(0, finalAmount)
+      
+      const penaltyText = recoveryPenalty > 0 ? `（侵蚀惩罚 -${penalty.toFixed(1)} 点）` : ''
+      const bonusText = recoveryBonus > 0 ? `（天赋加成 +${bonus.toFixed(1)} 点）` : ''
+      if (bonusText || penaltyText) {
+        addLog('discovery', `理智值恢复 ${finalAmount.toFixed(1)} 点${bonusText}${penaltyText}：${reason}`)
+      } else {
+        addLog('discovery', `理智值恢复 ${finalAmount} 点：${reason}`)
+      }
     }
     
-    gameState.value.sanity = Math.max(0, Math.min(gameState.value.maxSanity, gameState.value.sanity + finalAmount))
+    gameState.value.sanity = Math.max(0, Math.min(effectiveMaxSanity.value, gameState.value.sanity + finalAmount))
 
     if (amount < 0) {
       checkAnomalyEvents()
     }
+    
+    decayPollution()
 
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnSanityChange(gameState.value.sanity)
@@ -315,8 +480,9 @@ export const useGameStore = defineStore('game', () => {
 
     const talentBonus = talentEffects.value.evidenceHitRateBonus
     const sanityPenalty = getSanityPenalty(gameState.value.sanity, gameState.value.maxSanity)
+    const pollutionPenalty = milestoneEffects.value.hitRatePenalty
 
-    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty
+    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty
     finalRate = Math.max(5, Math.min(95, finalRate))
 
     const isGuaranteed = finalRate >= 95
@@ -326,7 +492,7 @@ export const useGameStore = defineStore('game', () => {
       baseRate,
       toolBonus: toolBonus + talentBonus,
       durabilityPenalty,
-      sanityPenalty,
+      sanityPenalty: sanityPenalty + pollutionPenalty,
       finalRate,
       isGuaranteed,
       isImpossible
@@ -815,7 +981,7 @@ export const useGameStore = defineStore('game', () => {
       now
     )
     
-    const eventTriggerBonus = talentEffects.value.eventTriggerChance
+    const eventTriggerBonus = talentEffects.value.eventTriggerChance + milestoneEffects.value.anomalyEventBonus
     
     for (const event of availableEvents) {
       if (checkAnomalyTrigger(event, gameState.value.sanity, gameState.value.maxSanity, eventTriggerBonus)) {
@@ -842,6 +1008,21 @@ export const useGameStore = defineStore('game', () => {
     
     addLog('discovery', `⚠️ ${event.name}`)
     addLog('discovery', event.description)
+
+    const tierMultiplier: Record<string, number> = {
+      normal: 1,
+      mild: 1.5,
+      moderate: 2,
+      severe: 3,
+      critical: 4
+    }
+    const multiplier = tierMultiplier[event.sanityTier] || 1
+    addPollution(
+      Math.round(8 * multiplier),
+      Math.round(3 * multiplier),
+      'anomaly_event',
+      `异常事件：${event.name}`
+    )
     
     if (event.effects.hallucination) {
       addHallucination(event.effects.hallucination)
@@ -1162,6 +1343,15 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.timerState.totalSeconds - gameState.value.timerState.remainingSeconds
   }
 
+  function getEndingDescriptor(isCorrectConclusion: boolean): EndingDescriptor {
+    return determineEndingAlignment(
+      gameState.value.spiritualPollution,
+      gameState.value.sanity,
+      gameState.value.maxSanity,
+      isCorrectConclusion
+    )
+  }
+
   function calculateScore(
     isCorrectConclusion: boolean,
     _conclusionOptionId: string,
@@ -1182,6 +1372,10 @@ export const useGameStore = defineStore('game', () => {
         gradeDescription: '数据缺失，无法评分'
       }
     }
+
+    const ending = getEndingDescriptor(isCorrectConclusion)
+    addLog('conclusion', `🏆 结局倾向：${ending.name}`)
+    addLog('conclusion', ending.description)
 
     const totalEvidence = caseData.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
     const discoveredEvidence = gameState.value.discoveredEvidence.length
@@ -1250,19 +1444,32 @@ export const useGameStore = defineStore('game', () => {
     if (!isCorrectConclusion) {
       penaltyScore += 10
     }
+
+    const erosionPenalty = Math.round(gameState.value.spiritualPollution.longTermErosion * 0.15)
+    if (erosionPenalty > 0) {
+      penaltyScore += erosionPenalty
+      addLog('penalty', `长期侵蚀惩罚：-${erosionPenalty} 分`)
+    }
+
+    const shockBonus = gameState.value.spiritualPollution.shortTermShock < 30 ? 5 : 0
+    if (shockBonus > 0) {
+      bonusScore += shockBonus
+      addLog('bonus', `精神状态良好奖励：+${shockBonus} 分`)
+    }
     
     penaltyScore = Math.round(penaltyScore * DEFAULT_SCORE_CONFIG.penaltyMultiplier)
 
-    let totalScore = evidenceScore + clueScore + deductionScore + timeScore + sanityScore + bonusScore - penaltyScore
+    const endingModifier = ending.scoreModifier
+    let totalScore = evidenceScore + clueScore + deductionScore + timeScore + sanityScore + bonusScore - penaltyScore + endingModifier
     totalScore = Math.max(0, Math.min(100, totalScore))
 
     const gradeDescriptions: Record<ScoreGrade, string> = {
-      'S': '完美调查！你是当之无愧的传奇侦探，揭露了所有真相！',
-      'A': '出色的调查！你成功揭示了核心真相，几乎没有遗漏。',
-      'B': '良好的调查！你找到了主要线索，虽然有些细节仍待完善。',
-      'C': '合格的调查！你得出了正确的结论，但仍有改进空间。',
-      'D': '勉强通过...你的调查过程较为艰难，下次要更谨慎。',
-      'F': '调查失败...真相被迷雾掩盖，需要重新开始。'
+      'S': `完美调查！${ending.name}：${ending.description}`,
+      'A': `出色的调查！${ending.name}：${ending.description}`,
+      'B': `良好的调查！${ending.name}：${ending.description}`,
+      'C': `合格的调查！${ending.name}：${ending.description}`,
+      'D': `勉强通过...${ending.name}：${ending.description}`,
+      'F': `调查失败...${ending.name}：${ending.description}`
     }
 
     let grade: ScoreGrade = 'F'
@@ -1273,9 +1480,18 @@ export const useGameStore = defineStore('game', () => {
     else if (totalScore >= thresholds.C) grade = 'C'
     else if (totalScore >= thresholds.D) grade = 'D'
 
-    addLog('conclusion', `案件评分：${grade}级 (${totalScore}分)`, {
-      breakdown: { evidenceScore, clueScore, deductionScore, timeScore, sanityScore, bonusScore, penaltyScore }
+    addLog('conclusion', `案件评分：${grade}级 (${totalScore}分) [结局修正：${endingModifier > 0 ? '+' : ''}${endingModifier}]`, {
+      breakdown: { evidenceScore, clueScore, deductionScore, timeScore, sanityScore, bonusScore, penaltyScore },
+      ending: ending.id
     })
+
+    if (ending.unlocksBranches) {
+      for (const branch of ending.unlocksBranches) {
+        if (!gameState.value.deductionBranches.includes(branch)) {
+          unlockDeductionBranch(branch)
+        }
+      }
+    }
 
     return {
       evidenceScore,
@@ -1952,7 +2168,8 @@ export const useGameStore = defineStore('game', () => {
       unlockedRecipes: [],
       craftingHistory: [],
       intelligenceState: createInitialIntelligenceState(),
-      mailDeliveryEvents: []
+      mailDeliveryEvents: [],
+      spiritualPollution: createInitialPollutionState()
     }
   }
 
@@ -1984,8 +2201,19 @@ export const useGameStore = defineStore('game', () => {
     nextPhase,
     overallProgress,
     deductionInfoCompleteness,
+    spiritualPollution,
+    totalPollution,
+    shockTier,
+    erosionTier,
+    milestoneEffects,
+    effectiveMaxSanity,
+    shockPercentage,
+    erosionPercentage,
     startCase,
     modifySanity,
+    addPollution,
+    decayPollution,
+    getEndingDescriptor,
     calculateHitRate,
     searchEvidence,
     canDiscoverEvidence,

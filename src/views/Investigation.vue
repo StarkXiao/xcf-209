@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
+import { CORRUPTION_MILESTONES } from '@/data/spiritualPollution'
 import type { Scene, Evidence, HitRateResult } from '@/types'
 import InventoryPanel from '@/components/inventory/InventoryPanel.vue'
 import CraftingPanel from '@/components/inventory/CraftingPanel.vue'
@@ -300,6 +301,44 @@ function getShadowStyle(index: number) {
     animationDelay: `${delay}s`,
     animationDuration: `${duration}s`
   }
+}
+
+function getShockTierLabel(tier: string): string {
+  const labels: Record<string, string> = {
+    calm: '平静',
+    jittery: '不安',
+    terrified: '恐惧',
+    panic: '惊恐',
+    catatonic: '僵住'
+  }
+  return labels[tier] || tier
+}
+
+function getErosionTierLabel(tier: string): string {
+  const labels: Record<string, string> = {
+    pure: '纯净',
+    touched: '微触',
+    marked: '刻印',
+    stained: '沾染',
+    lost: '沉沦'
+  }
+  return labels[tier] || tier
+}
+
+function getMilestoneName(msId: string): string {
+  const ms = CORRUPTION_MILESTONES.find(m => m.id === msId)
+  return ms?.name || msId
+}
+
+function getMilestoneDescription(msId: string): string {
+  const ms = CORRUPTION_MILESTONES.find(m => m.id === msId)
+  if (!ms) return ''
+  let desc = ms.description
+  if (ms.effects.maxSanityReduction) desc += `\n最大理智值上限 -${ms.effects.maxSanityReduction}`
+  if (ms.effects.sanityRecoveryPenalty) desc += `\n理智恢复效率 -${ms.effects.sanityRecoveryPenalty}%`
+  if (ms.effects.hitRatePenalty) desc += `\n搜查命中率 -${ms.effects.hitRatePenalty}%`
+  if (ms.effects.anomalyEventBonus) desc += `\n异常事件触发率 +${ms.effects.anomalyEventBonus}%`
+  return desc
 }
 </script>
 
@@ -626,7 +665,76 @@ function getShadowStyle(index: number) {
                   :style="{ width: `${gameStore.sanityPercentage}%` }"
                 ></div>
               </div>
-              <span class="sanity-value">{{ gameStore.gameState.sanity }}/{{ gameStore.gameState.maxSanity }}</span>
+              <span class="sanity-value">{{ gameStore.gameState.sanity }}/{{ gameStore.effectiveMaxSanity }}</span>
+            </div>
+            <div v-if="gameStore.milestoneEffects.maxSanityReduction > 0" class="sanity-reduction-note">
+              ⚠️ 上限 -{{ gameStore.milestoneEffects.maxSanityReduction }} (侵蚀)
+            </div>
+          </div>
+
+          <div class="pollution-panel">
+            <h4 class="panel-subtitle">精神污染</h4>
+            
+            <div class="pollution-row">
+              <div class="pollution-item">
+                <div class="pollution-label">
+                  <span class="shock-icon">⚡</span>
+                  <span>短期惊吓</span>
+                  <span class="pollution-tier" :class="`tier-${gameStore.shockTier}`">
+                    {{ getShockTierLabel(gameStore.shockTier) }}
+                  </span>
+                </div>
+                <div class="pollution-bar-container">
+                  <div class="pollution-bar">
+                    <div 
+                      class="pollution-fill shock-fill"
+                      :class="{ warn: gameStore.shockPercentage > 45, danger: gameStore.shockPercentage > 70 }"
+                      :style="{ width: `${gameStore.shockPercentage}%` }"
+                    ></div>
+                  </div>
+                  <span class="pollution-value">
+                    {{ gameStore.spiritualPollution.shortTermShock }}/{{ gameStore.spiritualPollution.maxShortTermShock }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="pollution-row">
+              <div class="pollution-item">
+                <div class="pollution-label">
+                  <span class="erosion-icon">🕳️</span>
+                  <span>长期侵蚀</span>
+                  <span class="pollution-tier" :class="`tier-${gameStore.erosionTier}`">
+                    {{ getErosionTierLabel(gameStore.erosionTier) }}
+                  </span>
+                </div>
+                <div class="pollution-bar-container">
+                  <div class="pollution-bar">
+                    <div 
+                      class="pollution-fill erosion-fill"
+                      :class="{ warn: gameStore.erosionPercentage > 30, danger: gameStore.erosionPercentage > 50, critical: gameStore.erosionPercentage > 70 }"
+                      :style="{ width: `${gameStore.erosionPercentage}%` }"
+                    ></div>
+                  </div>
+                  <span class="pollution-value">
+                    {{ gameStore.spiritualPollution.longTermErosion }}/{{ gameStore.spiritualPollution.maxLongTermErosion }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="gameStore.spiritualPollution.unlockedCorruptionMilestones.length > 0" class="milestones-list">
+              <div class="milestones-title">🔮 已达成里程碑</div>
+              <div class="milestone-tags">
+                <span 
+                  v-for="msId in gameStore.spiritualPollution.unlockedCorruptionMilestones" 
+                  :key="msId" 
+                  class="milestone-tag"
+                  :title="getMilestoneDescription(msId)"
+                >
+                  {{ getMilestoneName(msId) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -2021,6 +2129,191 @@ function getShadowStyle(index: number) {
 @keyframes badge-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.1); }
+}
+
+.pollution-panel {
+  padding: 0.75rem 1rem;
+  background: rgba(40, 20, 60, 0.4);
+  border: 1px solid rgba(139, 0, 139, 0.3);
+  border-radius: 6px;
+  min-width: 320px;
+}
+
+.sanity-reduction-note {
+  font-size: 0.7rem;
+  color: #ff6b6b;
+  margin-top: 0.25rem;
+}
+
+.pollution-row {
+  margin-bottom: 0.6rem;
+}
+
+.pollution-row:last-of-type {
+  margin-bottom: 0.4rem;
+}
+
+.pollution-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.pollution-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.shock-icon {
+  color: #ffd700;
+}
+
+.erosion-icon {
+  color: #8b008b;
+}
+
+.pollution-tier {
+  margin-left: auto;
+  padding: 0.1rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: bold;
+}
+
+.pollution-tier.tier-calm,
+.pollution-tier.tier-pure {
+  background: rgba(58, 139, 90, 0.2);
+  color: #4caf50;
+}
+
+.pollution-tier.tier-jittery,
+.pollution-tier.tier-touched {
+  background: rgba(139, 107, 58, 0.2);
+  color: #ffc107;
+}
+
+.pollution-tier.tier-terrified,
+.pollution-tier.tier-marked {
+  background: rgba(255, 152, 0, 0.2);
+  color: #ff9800;
+}
+
+.pollution-tier.tier-panic,
+.pollution-tier.tier-stained {
+  background: rgba(139, 58, 58, 0.2);
+  color: #f44336;
+}
+
+.pollution-tier.tier-catatonic,
+.pollution-tier.tier-lost {
+  background: rgba(139, 0, 139, 0.3);
+  color: #e040fb;
+  animation: pollution-pulse 1s infinite;
+}
+
+@keyframes pollution-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.pollution-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pollution-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pollution-fill {
+  height: 100%;
+  transition: all 0.3s ease;
+  border-radius: 3px;
+}
+
+.shock-fill {
+  background: linear-gradient(90deg, #ffc107, #ff9800);
+}
+
+.shock-fill.warn {
+  background: linear-gradient(90deg, #ff9800, #f44336);
+}
+
+.shock-fill.danger {
+  background: linear-gradient(90deg, #f44336, #d32f2f);
+  animation: shock-pulse 0.8s infinite;
+}
+
+@keyframes shock-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.4); }
+}
+
+.erosion-fill {
+  background: linear-gradient(90deg, #7b1fa2, #4a148c);
+}
+
+.erosion-fill.warn {
+  background: linear-gradient(90deg, #6a1b9a, #8e24aa);
+}
+
+.erosion-fill.danger {
+  background: linear-gradient(90deg, #8e24aa, #c2185b);
+}
+
+.erosion-fill.critical {
+  background: linear-gradient(90deg, #c2185b, #880e4f);
+  animation: erosion-pulse 1.5s infinite;
+}
+
+@keyframes erosion-pulse {
+  0%, 100% { filter: brightness(1) saturate(1); }
+  50% { filter: brightness(1.3) saturate(1.5); }
+}
+
+.pollution-value {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  font-family: monospace;
+  min-width: 55px;
+  text-align: right;
+}
+
+.milestones-list {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(139, 0, 139, 0.2);
+}
+
+.milestones-title {
+  font-size: 0.7rem;
+  color: #9c27b0;
+  margin-bottom: 0.3rem;
+}
+
+.milestone-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.milestone-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: rgba(139, 0, 139, 0.2);
+  border: 1px solid rgba(139, 0, 139, 0.4);
+  border-radius: 10px;
+  font-size: 0.65rem;
+  color: #e040fb;
+  cursor: help;
 }
 
 .tab-content {

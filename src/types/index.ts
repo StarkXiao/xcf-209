@@ -896,3 +896,96 @@ export interface MailDeliveryEvent {
   }
   delivered: boolean
 }
+
+export type PollutionType = 'short_term_shock' | 'long_term_erosion'
+
+export type PollutionSource = 
+  | 'evidence_sanity_loss' 
+  | 'clue_analysis' 
+  | 'scene_event' 
+  | 'anomaly_event' 
+  | 'time_out' 
+  | 'wrong_conclusion'
+  | 'repeated_low_sanity'
+  | 'dark_knowledge'
+  | 'save_ritual'
+  | 'ending_choice'
+
+export interface PollutionEvent {
+  id: string
+  type: PollutionType
+  amount: number
+  source: PollutionSource
+  description: string
+  timestamp: number
+}
+
+export type SaveRiskLevel = 'safe' | 'caution' | 'danger' | 'critical' | 'corrupted'
+
+export interface SaveRiskAssessment {
+  level: SaveRiskLevel
+  corruptionChance: number
+  dataLossChance: number
+  hallucinationInjectionChance: number
+  warningMessage: string
+}
+
+export type EndingAlignment = 
+  | 'truth_seeker'
+  | 'survivor' 
+  | 'forgetful'
+  | 'corrupted'
+  | 'fully_insane'
+  | 'martyr'
+
+export interface EndingPollutionRequirement {
+  maxShortTermShock?: number
+  minLongTermErosion?: number
+  maxLongTermErosion?: number
+  minTotalPollution?: number
+  maxTotalPollution?: number
+}
+
+export interface EndingDescriptor {
+  id: EndingAlignment
+  name: string
+  description: string
+  pollutionRequirement: EndingPollutionRequirement
+  sanityRequirement: { min?: number; max?: number }
+  scoreModifier: number
+  unlocksBranches?: string[]
+}
+
+export interface SpiritualPollutionState {
+  shortTermShock: number
+  longTermErosion: number
+  maxShortTermShock: number
+  maxLongTermErosion: number
+  pollutionEvents: PollutionEvent[]
+  lastDecayTime: number
+  lowSanityStreak: number
+  consecutiveDarkChoices: number
+  unlockedCorruptionMilestones: string[]
+}
+
+export interface CorruptionMilestone {
+  id: string
+  name: string
+  description: string
+  erosionThreshold: number
+  shockThreshold?: number
+  effects: {
+    maxSanityReduction?: number
+    sanityRecoveryPenalty?: number
+    hitRatePenalty?: number
+    anomalyEventBonus?: number
+    unlockEnding?: EndingAlignment
+  }
+  triggered: boolean
+}
+
+declare module './index' {
+  interface GameState {
+    spiritualPollution: SpiritualPollutionState
+  }
+}
