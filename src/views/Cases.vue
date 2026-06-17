@@ -117,6 +117,27 @@ function getPrereqNames(prereqIds: string[]): string[] {
   return prereqIds
     .map(id => cases.find(c => c.id === id)?.title || id)
 }
+
+function getBestGrade(caseId: string): string | undefined {
+  return progressStore.getProgress(caseId)?.bestGrade
+}
+
+function getBestScore(caseId: string): number | undefined {
+  return progressStore.getProgress(caseId)?.bestScore?.totalScore
+}
+
+function getFastestTime(caseId: string): number | undefined {
+  return progressStore.getProgress(caseId)?.fastestTime
+}
+
+function formatCaseTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  if (mins > 0) {
+    return `${mins}分${secs}秒`
+  }
+  return `${secs}秒`
+}
 </script>
 
 <template>
@@ -192,6 +213,23 @@ function getPrereqNames(prereqIds: string[]): string[] {
               <div class="stat-item">
                 <span class="stat-label">解锁分支</span>
                 <span class="stat-value branch-value">{{ getBranchesCount(caseItem.id) }}</span>
+              </div>
+              <div v-if="getBestGrade(caseItem.id)" class="stat-item grade-stat">
+                <span class="stat-label">最佳评级</span>
+                <span 
+                  class="stat-value"
+                  :class="`grade-${getBestGrade(caseItem.id)?.toLowerCase()}`"
+                >
+                  {{ getBestGrade(caseItem.id) }}
+                </span>
+              </div>
+              <div v-if="getFastestTime(caseItem.id)" class="stat-item">
+                <span class="stat-label">最快通关</span>
+                <span class="stat-value">{{ formatCaseTime(getFastestTime(caseItem.id)!) }}</span>
+              </div>
+              <div v-if="getBestScore(caseItem.id) !== undefined" class="stat-item">
+                <span class="stat-label">最高分数</span>
+                <span class="stat-value">{{ getBestScore(caseItem.id) }}</span>
               </div>
             </div>
 
@@ -441,8 +479,9 @@ function getPrereqNames(prereqIds: string[]): string[] {
 }
 
 .case-stats {
-  display: flex;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 0.5rem;
   margin-bottom: 0.75rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--color-border);
@@ -473,6 +512,13 @@ function getPrereqNames(prereqIds: string[]): string[] {
 .case-stats .branch-value {
   color: #ffd700;
 }
+
+.grade-stat .stat-value.grade-s { color: #ffd700; text-shadow: 0 0 8px rgba(255, 215, 0, 0.4); }
+.grade-stat .stat-value.grade-a { color: var(--color-accent-light); }
+.grade-stat .stat-value.grade-b { color: var(--color-success); }
+.grade-stat .stat-value.grade-c { color: #ff9800; }
+.grade-stat .stat-value.grade-d { color: #8b5a2b; }
+.grade-stat .stat-value.grade-f { color: var(--color-danger); }
 
 .case-progress {
   margin-top: auto;

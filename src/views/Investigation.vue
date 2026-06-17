@@ -17,6 +17,7 @@ const showToolPanel = ref(false)
 const hoveredEvidence = ref<Evidence | null>(null)
 const searchResultMessage = ref('')
 const showSearchResult = ref(false)
+const showGameLog = ref(false)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -174,6 +175,30 @@ function getDiscoveredSpecialCount(): number {
     return sum + s.evidence.filter(e => e.isSpecial && gameStore.gameState.discoveredEvidence.includes(e.id)).length
   }, 0)
 }
+
+function getLogTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    discovery: '🔍 发现',
+    analysis: '🧠 分析',
+    connection: '🔗 关联',
+    sanity_loss: '💔 理智',
+    conclusion: '📝 结论',
+    tool_use: '🔧 工具',
+    tool_repair: '🛠️ 修复',
+    tool_break: '⚠️ 损坏',
+    timer: '⏱️ 时间',
+    scene_switch: '🚪 场景',
+    timeout: '⏰ 超时',
+    penalty: '❌ 惩罚',
+    bonus: '🎁 奖励'
+  }
+  return labels[type] || type
+}
+
+function formatLogTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
 </script>
 
 <template>
@@ -199,6 +224,32 @@ function getDiscoveredSpecialCount(): number {
           <div class="special-evidence-info">
             <span class="special-label">特殊证据</span>
             <span class="special-value">{{ getDiscoveredSpecialCount() }}/{{ getSpecialEvidenceCount() }}</span>
+          </div>
+        </div>
+        <div class="timer-section">
+          <div class="timer-header">
+            <span class="timer-icon">⏱️</span>
+            <span class="timer-label">搜证时限</span>
+          </div>
+          <div 
+            class="timer-display"
+            :class="{ 
+              'low-time': gameStore.isLowTime, 
+              'critical-time': gameStore.isCriticalTime,
+              'expired': gameStore.gameState.timerState.isExpired 
+            }"
+          >
+            {{ gameStore.formattedRemainingTime }}
+          </div>
+          <div class="timer-bar-container">
+            <div 
+              class="timer-bar"
+              :class="{ 'low': gameStore.isLowTime, 'critical': gameStore.isCriticalTime }"
+              :style="{ width: `${gameStore.timerPercentage}%` }"
+            ></div>
+          </div>
+          <div v-if="gameStore.gameState.timerState.isExpired" class="timer-expired-warning">
+            ⚠️ 时间已到！
           </div>
         </div>
       </div>
@@ -381,6 +432,11 @@ function getDiscoveredSpecialCount(): number {
               <span class="action-icon">💡</span>
               <span class="action-text">真相推演</span>
             </button>
+            <button class="action-btn" @click="showGameLog = true">
+              <span class="action-icon">📜</span>
+              <span class="action-text">调查日志</span>
+              <span class="action-count">{{ gameStore.gameState.gameLog.length }}</span>
+            </button>
             <button class="action-btn" @click="router.push('/cases')">
               <span class="action-icon">📋</span>
               <span class="action-text">返回案件</span>
@@ -434,6 +490,66 @@ function getDiscoveredSpecialCount(): number {
 
             <div class="evidence-footer">
               <button class="close-btn" @click="closeEvidenceDetail">关闭</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="fade">
+        <div v-if="showGameLog" class="evidence-modal" @click.self="showGameLog = false">
+          <div class="game-log-panel card">
+            <div class="log-header">
+              <h3 class="log-title">📜 调查日志</h3>
+              <button class="close-btn small" @click="showGameLog = false">✕</button>
+            </div>
+            
+            <div class="log-stats">
+              <div class="log-stat-item">
+                <span class="stat-label">场景切换</span>
+                <span class="stat-value">{{ gameStore.gameState.timerState.sceneSwitchCount }} 次</span>
+              </div>
+              <div class="log-stat-item">
+                <span class="stat-label">搜查次数</span>
+                <span class="stat-value">{{ gameStore.gameState.timerState.searchAttemptCount }} 次</span>
+              </div>
+              <div class="log-stat-item">
+                <span class="stat-label">失败次数</span>
+                <span class="stat-value fail">{{ gameStore.gameState.timerState.failedSearchCount }} 次</span>
+              </div>
+            </div>
+
+            <div class="log-list-container">
+              <div class="log-list">
+                <div 
+                  v-for="log in gameStore.gameState.gameLog.slice().reverse()" 
+                  :key="log.id"
+                  class="log-entry"
+                  :class="`log-type-${log.type}`"
+                >
+                  <div class="log-entry-header">
+                    <span class="log-type-badge">{{ getLogTypeLabel(log.type) }}</span>
+                    <span class="log-time">{{ formatLogTime(log.timestamp) }}</span>
+                  </div>
+                  <div class="log-description">{{ log.description }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="log-footer">
+              <span class="log-count">共 {{ gameStore.gameState.gameLog.length }} 条记录</span>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="fade">
+        <div v-if="gameStore.gameState.timerState.isExpired && !showEvidenceDetail" class="timeout-overlay">
+          <div class="timeout-content">
+            <div class="timeout-icon">⏰</div>
+            <h2 class="timeout-title">搜证时间已到！</h2>
+            <p class="timeout-message">理智值受到了冲击，但你仍可以尝试进行推演结案。</p>
+            <div class="timeout-actions">
+              <button class="primary-btn" @click="goToDeduction">前往推演</button>
             </div>
           </div>
         </div>
@@ -1181,6 +1297,279 @@ function getDiscoveredSpecialCount(): number {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.timer-section {
+  min-width: 180px;
+  text-align: center;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.timer-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.timer-icon {
+  font-size: 1rem;
+}
+
+.timer-label {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.timer-display {
+  font-size: 2rem;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  color: var(--color-accent-light);
+  margin-bottom: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.timer-display.low-time {
+  color: #ff9800;
+  animation: timer-pulse 1s infinite;
+}
+
+.timer-display.critical-time {
+  color: #f44336;
+  animation: timer-pulse 0.5s infinite;
+}
+
+.timer-display.expired {
+  color: #f44336;
+  opacity: 0.7;
+}
+
+@keyframes timer-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.timer-bar-container {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.25rem;
+}
+
+.timer-bar {
+  height: 100%;
+  background: var(--color-accent);
+  transition: all 0.3s ease;
+}
+
+.timer-bar.low {
+  background: #ff9800;
+}
+
+.timer-bar.critical {
+  background: #f44336;
+}
+
+.timer-expired-warning {
+  font-size: 0.8rem;
+  color: #f44336;
+  font-weight: bold;
+  margin-top: 0.25rem;
+}
+
+.game-log-panel {
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.log-title {
+  font-size: 1.3rem;
+  color: var(--color-accent-light);
+}
+
+.close-btn.small {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.log-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.log-stat-item {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.log-stat-item .stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+
+.log-stat-item .stat-value {
+  font-size: 1.1rem;
+  color: var(--color-accent-light);
+  font-weight: bold;
+}
+
+.log-stat-item .stat-value.fail {
+  color: var(--color-danger);
+}
+
+.log-list-container {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.log-entry {
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  border-left: 3px solid var(--color-border);
+}
+
+.log-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.log-type-badge {
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.log-time {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+}
+
+.log-description {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.log-entry.log-type-discovery { border-left-color: var(--color-accent); }
+.log-entry.log-type-deduction { border-left-color: #ff9800; }
+.log-entry.log-type-sanity_loss { border-left-color: var(--color-danger); }
+.log-entry.log-type-tool_use { border-left-color: #4caf50; }
+.log-entry.log-type-timer { border-left-color: #9c27b0; }
+.log-entry.log-type-scene_switch { border-left-color: #2196f3; }
+.log-entry.log-type-timeout { border-left-color: #f44336; }
+.log-entry.log-type-penalty { border-left-color: #e91e63; }
+.log-entry.log-type-bonus { border-left-color: #ffd700; }
+
+.log-footer {
+  padding-top: 0.75rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.timeout-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(139, 58, 58, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  backdrop-filter: blur(5px);
+}
+
+.timeout-content {
+  text-align: center;
+  padding: 3rem;
+  background: var(--color-bg-card);
+  border: 2px solid var(--color-danger);
+  border-radius: 12px;
+  max-width: 450px;
+}
+
+.timeout-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.timeout-title {
+  font-size: 2rem;
+  color: var(--color-danger);
+  margin-bottom: 1rem;
+}
+
+.timeout-message {
+  color: var(--color-text-dim);
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+
+.timeout-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.primary-btn {
+  padding: 0.75rem 2rem;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.primary-btn:hover {
+  background: var(--color-accent-light);
+  transform: translateY(-2px);
 }
 
 @media (max-width: 1024px) {

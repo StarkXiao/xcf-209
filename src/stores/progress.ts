@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { CaseProgress, CaseRewards } from '@/types'
+import type { CaseProgress, CaseRewards, CaseScoreBreakdown, PlayRecord } from '@/types'
 import { cases, getCaseById, setCaseStatus } from '@/data/cases'
 import { useGameStore } from './game'
 import { useSaveStore } from './save'
@@ -73,7 +73,8 @@ export const useProgressStore = defineStore('progress', () => {
         unlockedBranches: [],
         discoveredEvidence: [],
         discoveredClues: [],
-        totalSanityLost: 0
+        totalSanityLost: 0,
+        playHistory: []
       }
     }
     return progressMap.value[caseId]
@@ -130,7 +131,9 @@ export const useProgressStore = defineStore('progress', () => {
     caseId: string,
     endingId: string,
     branchId?: string,
-    sanityLost: number = 0
+    sanityLost: number = 0,
+    score?: CaseScoreBreakdown,
+    timeUsed?: number
   ): CaseRewards | null {
     const progress = initProgress(caseId)
     const caseData = getCaseById(caseId)
@@ -149,6 +152,31 @@ export const useProgressStore = defineStore('progress', () => {
 
     if (wasFirstCompletion || !progress.bestEnding) {
       progress.bestEnding = endingId
+    }
+
+    if (score) {
+      if (!progress.bestScore || score.totalScore > progress.bestScore.totalScore) {
+        progress.bestScore = score
+        progress.bestGrade = score.grade
+      }
+    }
+
+    if (timeUsed !== undefined) {
+      if (!progress.fastestTime || timeUsed < progress.fastestTime) {
+        progress.fastestTime = timeUsed
+      }
+    }
+
+    if (score && timeUsed !== undefined) {
+      const playRecord: PlayRecord = {
+        completedAt: Date.now(),
+        endingId,
+        branch: branchId,
+        score,
+        timeUsed,
+        sanityLost
+      }
+      progress.playHistory.push(playRecord)
     }
 
     setCaseStatus(caseId, 'completed')

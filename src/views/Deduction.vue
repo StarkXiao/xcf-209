@@ -6,7 +6,7 @@ import { useSaveStore } from '@/stores/save'
 import { useProgressStore } from '@/stores/progress'
 import { getCaseById, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
-import type { ConclusionOption, CaseRewards } from '@/types'
+import type { ConclusionOption, CaseRewards, CaseScoreBreakdown } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +24,8 @@ const branchRewards = ref<string[]>([])
 const caseRewards = ref<CaseRewards | null>(null)
 const isFirstCompletion = ref(false)
 const newlyUnlockedCases = ref<string[]>([])
+const caseScore = ref<CaseScoreBreakdown | null>(null)
+const usedTime = ref(0)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -134,6 +136,9 @@ function makeDeduction() {
   const option = caseData.value.conclusion.options.find(o => o.id === selectedConclusion.value)
   if (!option) return
   
+  gameStore.stopTimer()
+  usedTime.value = gameStore.getUsedTime()
+  
   isCorrect.value = option.isCorrect
   resultMessage.value = option.feedback
   sanityLost.value = option.sanityCost
@@ -141,6 +146,7 @@ function makeDeduction() {
   caseRewards.value = null
   isFirstCompletion.value = false
   newlyUnlockedCases.value = []
+  caseScore.value = null
   
   if (option.branch) {
     unlockedBranch.value = option.branch
@@ -151,11 +157,15 @@ function makeDeduction() {
     gameStore.modifySanity(-option.sanityCost, '真相推演')
   }
   
+  caseScore.value = gameStore.calculateScore(option.isCorrect, option.id, option.branch)
+  
   if (option.isCorrect) {
     gameStore.addLog('conclusion', `案件已结案：${caseData.value.title}`, {
       conclusion: option.text,
       sanityLost: option.sanityCost,
-      branch: option.branch
+      branch: option.branch,
+      score: caseScore.value.totalScore,
+      grade: caseScore.value.grade
     })
 
     const prevCompleted = progressStore.getProgress(caseData.value.id)?.completed
@@ -165,7 +175,9 @@ function makeDeduction() {
       caseData.value.id,
       option.id,
       option.branch,
-      option.sanityCost
+      option.sanityCost,
+      caseScore.value,
+      usedTime.value
     )
     caseRewards.value = rewards
 
@@ -232,6 +244,12 @@ function getBranchInfo(branch: string): { name: string; description: string } {
     }
   }
   return branches[branch] || { name: branch, description: '' }
+}
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}分${secs}秒`
 }
 </script>
 
@@ -432,6 +450,19 @@ function getBranchInfo(branch: string): { name: string; description: string } {
               <span class="stat-label">推演分支</span>
               <span class="stat-value">{{ gameStore.gameState.deductionBranches.length }}</span>
             </div>
+            <div class="stat-item timer-stat">
+              <span class="stat-label">剩余时间</span>
+              <span 
+                class="stat-value" 
+                :class="{ 
+                  'low': gameStore.isLowTime, 
+                  'critical': gameStore.isCriticalTime,
+                  'expired': gameStore.gameState.timerState.isExpired 
+                }"
+              >
+                {{ gameStore.formattedRemainingTime }}
+              </span>
+            </div>
           </div>
 
           <div class="game-log">
@@ -461,6 +492,55 @@ function getBranchInfo(branch: string): { name: string; description: string } {
               {{ isCorrect ? '推演正确！' : '推演失败...' }}
             </h2>
             <p v-if="isFirstCompletion" class="first-clear-badge">🏆 首次通关！</p>
+
+            <div v-if="caseScore" class="score-section">
+              <div 
+                class="grade-display"
+                :class="`grade-${caseScore.grade.toLowerCase()}`"
+              >
+                <div class="grade-letter">{{ caseScore.grade }}</div>
+                <div class="grade-score">{{ caseScore.totalScore }} 分</div>
+              </div>
+              <p class="grade-desc">{{ caseScore.gradeDescription }}</p>
+              
+              <div class="score-breakdown">
+                <h4>评分明细</h4>
+                <div class="score-item">
+                  <span class="score-label">证据收集</span>
+                  <span class="score-value positive">+{{ caseScore.evidenceScore }}</span>
+                </div>
+                <div class="score-item">
+                  <span class="score-label">线索获取</span>
+                  <span class="score-value positive">+{{ caseScore.clueScore }}</span>
+                </div>
+                <div class="score-item">
+                  <span class="score-label">推演分析</span>
+                  <span class="score-value positive">+{{ caseScore.deductionScore }}</span>
+                </div>
+                <div class="score-item">
+                  <span class="score-label">时间效率</span>
+                  <span class="score-value positive">+{{ caseScore.timeScore }}</span>
+                </div>
+                <div class="score-item">
+                  <span class="score-label">理智保持</span>
+                  <span class="score-value positive">+{{ caseScore.sanityScore }}</span>
+                </div>
+                <div v-if="caseScore.bonusScore > 0" class="score-item">
+                  <span class="score-label bonus">额外奖励</span>
+                  <span class="score-value bonus">+{{ caseScore.bonusScore }}</span>
+                </div>
+                <div v-if="caseScore.penaltyScore > 0" class="score-item">
+                  <span class="score-label penalty">扣分惩罚</span>
+                  <span class="score-value penalty">-{{ caseScore.penaltyScore }}</span>
+                </div>
+              </div>
+
+              <div class="time-summary">
+                <span>用时: {{ formatTime(usedTime) }}</span>
+                <span>剩余: {{ gameStore.formattedRemainingTime }}</span>
+              </div>
+            </div>
+
             <p class="result-message">{{ resultMessage }}</p>
 
             <div v-if="unlockedBranch" class="branch-unlock">
@@ -492,8 +572,9 @@ function getBranchInfo(branch: string): { name: string; description: string } {
               <span>理智恢复：+{{ caseRewards.sanityBonus }}</span>
             </div>
             
-            <div v-if="sanityLost > 0" class="result-sanity">
-              <span>理智消耗: -{{ sanityLost }}</span>
+            <div v-if="sanityLost > 0 || gameStore.gameState.timerState.isExpired" class="result-sanity">
+              <span v-if="sanityLost > 0">推演消耗: -{{ sanityLost }}</span>
+              <span v-if="gameStore.gameState.timerState.isExpired" class="timeout-penalty">⏰ 超时惩罚: -20</span>
               <span>剩余理智: {{ gameStore.gameState.sanity }}</span>
             </div>
 
@@ -1228,6 +1309,160 @@ function getBranchInfo(branch: string): { name: string; description: string } {
 .close-btn {
   padding: 0.75rem 2rem;
   font-size: 1rem;
+}
+
+.timer-stat .stat-value.low {
+  color: #ff9800;
+}
+
+.timer-stat .stat-value.critical {
+  color: #f44336;
+  animation: pulse 1s infinite;
+}
+
+.timer-stat .stat-value.expired {
+  color: #f44336;
+  opacity: 0.6;
+}
+
+.score-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.grade-display {
+  text-align: center;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 2px solid var(--color-border);
+}
+
+.grade-display.grade-s {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 140, 0, 0.2));
+  border-color: #ffd700;
+}
+
+.grade-display.grade-a {
+  background: rgba(107, 76, 154, 0.2);
+  border-color: var(--color-accent);
+}
+
+.grade-display.grade-b {
+  background: rgba(58, 139, 90, 0.2);
+  border-color: var(--color-success);
+}
+
+.grade-display.grade-c {
+  background: rgba(255, 152, 0, 0.2);
+  border-color: #ff9800;
+}
+
+.grade-display.grade-d {
+  background: rgba(139, 90, 43, 0.2);
+  border-color: #8b5a2b;
+}
+
+.grade-display.grade-f {
+  background: rgba(139, 58, 58, 0.2);
+  border-color: var(--color-danger);
+}
+
+.grade-letter {
+  font-size: 3.5rem;
+  font-weight: bold;
+  line-height: 1;
+  margin-bottom: 0.25rem;
+}
+
+.grade-s .grade-letter { color: #ffd700; text-shadow: 0 0 20px rgba(255, 215, 0, 0.5); }
+.grade-a .grade-letter { color: var(--color-accent-light); }
+.grade-b .grade-letter { color: var(--color-success); }
+.grade-c .grade-letter { color: #ff9800; }
+.grade-d .grade-letter { color: #8b5a2b; }
+.grade-f .grade-letter { color: var(--color-danger); }
+
+.grade-score {
+  font-size: 1.2rem;
+  color: var(--color-text-dim);
+}
+
+.grade-desc {
+  text-align: center;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.score-breakdown {
+  padding-top: 1rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.score-breakdown h4 {
+  font-size: 0.9rem;
+  color: var(--color-accent-light);
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  border-radius: 4px;
+}
+
+.score-item:nth-child(odd) {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.score-label {
+  color: var(--color-text-dim);
+}
+
+.score-label.bonus {
+  color: #ffd700;
+  font-weight: bold;
+}
+
+.score-label.penalty {
+  color: var(--color-danger);
+  font-weight: bold;
+}
+
+.score-value.positive {
+  color: var(--color-success);
+  font-weight: bold;
+}
+
+.score-value.bonus {
+  color: #ffd700;
+  font-weight: bold;
+}
+
+.score-value.penalty {
+  color: var(--color-danger);
+  font-weight: bold;
+}
+
+.time-summary {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.timeout-penalty {
+  color: var(--color-danger) !important;
+  font-weight: bold;
 }
 
 .fade-enter-active,

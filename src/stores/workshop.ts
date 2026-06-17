@@ -53,7 +53,15 @@ const createEmptyCase = (): Case => ({
     sanityBonus: 10,
     description: '案件完成奖励'
   },
-  branchRewards: {}
+  branchRewards: {},
+  timeLimit: {
+    totalSeconds: 900,
+    sceneSwitchCost: 10,
+    searchAttemptCost: 5,
+    failedSearchPenalty: 15,
+    clueAnalysisCost: 8,
+    specialEventBonus: 30
+  }
 })
 
 export const useWorkshopStore = defineStore('workshop', () => {

@@ -1,11 +1,31 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
+
+let timerInterval: ReturnType<typeof setInterval> | null = null
+
+const DEFAULT_SCORE_CONFIG: CaseScoreConfig = {
+  evidenceWeight: 30,
+  clueWeight: 20,
+  deductionWeight: 20,
+  timeWeight: 15,
+  sanityWeight: 15,
+  bonusMultiplier: 1.5,
+  penaltyMultiplier: 1.0,
+  gradeThresholds: {
+    'S': 90,
+    'A': 80,
+    'B': 70,
+    'C': 60,
+    'D': 40,
+    'F': 0
+  }
+}
 
 export const useGameStore = defineStore('game', () => {
   const characterStore = useCharacterStore()
@@ -42,7 +62,19 @@ export const useGameStore = defineStore('game', () => {
     failedSearches: [],
     deductionBranches: [],
     characterProfileId: null,
-    triggeredEvents: []
+    triggeredEvents: [],
+    timerState: {
+      remainingSeconds: 0,
+      totalSeconds: 0,
+      isRunning: false,
+      isPaused: false,
+      isExpired: false,
+      timeBonusUsed: 0,
+      lastActionTime: Date.now(),
+      sceneSwitchCount: 0,
+      searchAttemptCount: 0,
+      failedSearchCount: 0
+    }
   })
 
   const currentCase = computed(() => {
@@ -71,6 +103,26 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.tools.find(t => t.id === gameState.value.selectedToolId) || null
   })
 
+  const timerPercentage = computed(() => {
+    if (gameState.value.timerState.totalSeconds === 0) return 100
+    return (gameState.value.timerState.remainingSeconds / gameState.value.timerState.totalSeconds) * 100
+  })
+
+  const isLowTime = computed(() => {
+    return gameState.value.timerState.remainingSeconds <= 120 && gameState.value.timerState.totalSeconds > 0
+  })
+
+  const isCriticalTime = computed(() => {
+    return gameState.value.timerState.remainingSeconds <= 60 && gameState.value.timerState.totalSeconds > 0
+  })
+
+  const formattedRemainingTime = computed(() => {
+    const seconds = gameState.value.timerState.remainingSeconds
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  })
+
   function startCase(caseId: string, inheritedTools?: string[]) {
     const caseData = getCaseById(caseId)
     if (!caseData) return false
@@ -97,6 +149,7 @@ export const useGameStore = defineStore('game', () => {
     const finalMaxSanity = baseMaxSanity + maxSanityBonus
 
     const charId = activeCharacterId.value
+    const timeLimit = caseData.timeLimit || { totalSeconds: 900, sceneSwitchCost: 10, searchAttemptCost: 5, failedSearchPenalty: 15, clueAnalysisCost: 8 }
 
     gameState.value = {
       currentCase: caseId,
@@ -115,8 +168,22 @@ export const useGameStore = defineStore('game', () => {
       failedSearches: [],
       deductionBranches: [],
       characterProfileId: charId,
-      triggeredEvents: []
+      triggeredEvents: [],
+      timerState: {
+        remainingSeconds: timeLimit.totalSeconds,
+        totalSeconds: timeLimit.totalSeconds,
+        isRunning: true,
+        isPaused: false,
+        isExpired: false,
+        timeBonusUsed: 0,
+        lastActionTime: Date.now(),
+        sceneSwitchCount: 0,
+        searchAttemptCount: 0,
+        failedSearchCount: 0
+      }
     }
+
+    startTimer()
 
     if (charId) {
       characterStore.incrementPlayCount(charId)
@@ -229,9 +296,24 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
+    if (gameState.value.timerState.isExpired) {
+      return {
+        success: false,
+        evidenceId: evidence.id,
+        hitRate: 0,
+        durabilityLost: 0,
+        message: '⏰ 搜证时间已到，无法继续搜查'
+      }
+    }
+
     const hitRateResult = calculateHitRate(evidence)
     const selectedToolData = selectedTool.value
     let durabilityLost = 0
+    const searchAttemptCost = currentCase.value?.timeLimit?.searchAttemptCost || 5
+    const failedSearchPenalty = currentCase.value?.timeLimit?.failedSearchPenalty || 15
+
+    gameState.value.timerState.searchAttemptCount++
+    consumeTime(searchAttemptCost, `搜查证据：${evidence.name}`)
 
     if (selectedToolData && selectedToolData.uses > 0 && selectedToolData.durability > 0) {
       const baseDurabilityLoss = Math.floor(Math.random() * 5) + 3
@@ -253,6 +335,11 @@ export const useGameStore = defineStore('game', () => {
         })
       }
 
+      if (evidence.isSpecial) {
+        const bonusTime = currentCase.value?.timeLimit?.specialEventBonus || 30
+        addTimeBonus(bonusTime, `发现特殊证据：${evidence.name}`)
+      }
+
       addLog('tool_use', `使用 ${selectedToolData?.name || '徒手搜查'} 成功发现 ${evidence.name}`)
 
       return {
@@ -268,6 +355,9 @@ export const useGameStore = defineStore('game', () => {
         gameState.value.failedSearches.push(evidence.id)
       }
       
+      gameState.value.timerState.failedSearchCount++
+      consumeTime(failedSearchPenalty, `搜查失败惩罚：${evidence.name}`)
+      addLog('penalty', `搜查 ${evidence.name} 失败，额外消耗 ${failedSearchPenalty} 秒`)
       addLog('tool_use', `搜查 ${evidence.name} 失败（成功率 ${hitRateResult.finalRate}%）`)
 
       return {
@@ -419,14 +509,19 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function visitScene(sceneId: string) {
+    const sceneSwitchCost = currentCase.value?.timeLimit?.sceneSwitchCost || 10
     if (!gameState.value.visitedScenes.includes(sceneId)) {
       gameState.value.visitedScenes.push(sceneId)
       addLog('discovery', `探索新场景：${sceneId}`)
-      
+      consumeTime(sceneSwitchCost, `首次进入场景：${sceneId}`)
+      gameState.value.timerState.sceneSwitchCount++
       triggerRandomEvents('scene_enter')
     } else {
+      consumeTime(Math.floor(sceneSwitchCost * 0.5), `切换场景：${sceneId}`)
+      gameState.value.timerState.sceneSwitchCount++
       triggerRandomEvents('random')
     }
+    addLog('scene_switch', `场景切换：${sceneId}，消耗时间 ${gameState.value.visitedScenes.includes(sceneId) ? Math.floor(sceneSwitchCost * 0.5) : sceneSwitchCost} 秒`)
     triggerRandomEvents('talent_based')
     triggerRandomEvents('sanity_level')
   }
@@ -575,7 +670,206 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.deductionBranches.includes(branchId)
   }
 
+  function startTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval)
+    }
+    
+    gameState.value.timerState.isRunning = true
+    gameState.value.timerState.isPaused = false
+    
+    timerInterval = setInterval(() => {
+      if (gameState.value.timerState.isPaused || !gameState.value.timerState.isRunning) {
+        return
+      }
+      
+      if (gameState.value.timerState.remainingSeconds > 0) {
+        gameState.value.timerState.remainingSeconds--
+        
+        if (gameState.value.timerState.remainingSeconds <= 0) {
+          handleTimeExpired()
+        }
+      }
+    }, 1000)
+  }
+
+  function pauseTimer() {
+    gameState.value.timerState.isPaused = true
+    addLog('timer', '计时器已暂停')
+  }
+
+  function resumeTimer() {
+    gameState.value.timerState.isPaused = false
+    addLog('timer', '计时器已恢复')
+  }
+
+  function stopTimer() {
+    gameState.value.timerState.isRunning = false
+    if (timerInterval) {
+      clearInterval(timerInterval)
+      timerInterval = null
+    }
+  }
+
+  function consumeTime(seconds: number, reason: string) {
+    if (gameState.value.timerState.isExpired) return
+    
+    gameState.value.timerState.remainingSeconds = Math.max(0, gameState.value.timerState.remainingSeconds - seconds)
+    gameState.value.timerState.lastActionTime = Date.now()
+    
+    addLog('timer', `消耗时间 ${seconds} 秒：${reason}`)
+    
+    if (gameState.value.timerState.remainingSeconds <= 0) {
+      handleTimeExpired()
+    }
+  }
+
+  function addTimeBonus(seconds: number, reason: string) {
+    gameState.value.timerState.remainingSeconds = Math.min(
+      gameState.value.timerState.totalSeconds,
+      gameState.value.timerState.remainingSeconds + seconds
+    )
+    gameState.value.timerState.timeBonusUsed += seconds
+    
+    addLog('bonus', `时间奖励 +${seconds} 秒：${reason}`)
+  }
+
+  function handleTimeExpired() {
+    gameState.value.timerState.remainingSeconds = 0
+    gameState.value.timerState.isExpired = true
+    gameState.value.timerState.isRunning = false
+    
+    stopTimer()
+    
+    const sanityPenalty = 20
+    modifySanity(-sanityPenalty, '搜证时间耗尽')
+    
+    addLog('timeout', `⚠️ 搜证时间已耗尽！理智值 -${sanityPenalty}`)
+    addLog('penalty', `时间到惩罚：理智值大幅下降，结案评分将受影响`)
+  }
+
+  function getUsedTime(): number {
+    return gameState.value.timerState.totalSeconds - gameState.value.timerState.remainingSeconds
+  }
+
+  function calculateScore(
+    isCorrectConclusion: boolean,
+    _conclusionOptionId: string,
+    branchId?: string
+  ): CaseScoreBreakdown {
+    const caseData = currentCase.value
+    if (!caseData) {
+      return {
+        evidenceScore: 0,
+        clueScore: 0,
+        deductionScore: 0,
+        timeScore: 0,
+        sanityScore: 0,
+        bonusScore: 0,
+        penaltyScore: 0,
+        totalScore: 0,
+        grade: 'F',
+        gradeDescription: '数据缺失，无法评分'
+      }
+    }
+
+    const totalEvidence = caseData.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
+    const discoveredEvidence = gameState.value.discoveredEvidence.length
+    const evidenceRatio = totalEvidence > 0 ? discoveredEvidence / totalEvidence : 0
+    const evidenceScore = Math.round(evidenceRatio * DEFAULT_SCORE_CONFIG.evidenceWeight * 100 / 30)
+
+    const totalClues = caseData.clues.length
+    const discoveredClues = gameState.value.discoveredClues.length
+    const clueRatio = totalClues > 0 ? discoveredClues / totalClues : 0
+    const clueScore = Math.round(clueRatio * DEFAULT_SCORE_CONFIG.clueWeight * 100 / 20)
+
+    const analyzedRatio = discoveredClues > 0 ? gameState.value.analyzedClues.length / discoveredClues : 0
+    const connectionBonus = Math.min(gameState.value.clueConnections.length * 2, 10)
+    const deductionBaseScore = isCorrectConclusion ? DEFAULT_SCORE_CONFIG.deductionWeight * 100 / 20 : 0
+    const deductionScore = Math.round(deductionBaseScore * (0.5 + analyzedRatio * 0.5)) + connectionBonus
+
+    const usedTime = getUsedTime()
+    const totalTime = gameState.value.timerState.totalSeconds || caseData.timeLimit.totalSeconds
+    const timeRatio = totalTime > 0 ? Math.max(0, 1 - usedTime / totalTime) : 0
+    const timeScore = Math.round(timeRatio * DEFAULT_SCORE_CONFIG.timeWeight * 100 / 15)
+
+    const sanityRatio = gameState.value.sanity / gameState.value.maxSanity
+    const sanityScore = Math.round(sanityRatio * DEFAULT_SCORE_CONFIG.sanityWeight * 100 / 15)
+
+    let bonusScore = 0
+    const specialEvidenceCount = caseData.scenes.reduce(
+      (sum, s) => sum + s.evidence.filter(e => e.isSpecial && gameState.value.discoveredEvidence.includes(e.id)).length,
+      0
+    )
+    bonusScore += specialEvidenceCount * 5
+    
+    const unlockedBranches = gameState.value.deductionBranches.length
+    bonusScore += unlockedBranches * 8
+    
+    if (branchId === 'deep-truth') {
+      bonusScore += 15
+    }
+    
+    bonusScore = Math.round(bonusScore * DEFAULT_SCORE_CONFIG.bonusMultiplier)
+
+    let penaltyScore = 0
+    if (gameState.value.timerState.isExpired) {
+      penaltyScore += 25
+    }
+    
+    const failedSearchRate = gameState.value.timerState.searchAttemptCount > 0
+      ? gameState.value.timerState.failedSearchCount / gameState.value.timerState.searchAttemptCount
+      : 0
+    penaltyScore += Math.round(failedSearchRate * 15)
+    
+    penaltyScore += gameState.value.timerState.sceneSwitchCount * 0.5
+    
+    if (!isCorrectConclusion) {
+      penaltyScore += 10
+    }
+    
+    penaltyScore = Math.round(penaltyScore * DEFAULT_SCORE_CONFIG.penaltyMultiplier)
+
+    let totalScore = evidenceScore + clueScore + deductionScore + timeScore + sanityScore + bonusScore - penaltyScore
+    totalScore = Math.max(0, Math.min(100, totalScore))
+
+    const gradeDescriptions: Record<ScoreGrade, string> = {
+      'S': '完美调查！你是当之无愧的传奇侦探，揭露了所有真相！',
+      'A': '出色的调查！你成功揭示了核心真相，几乎没有遗漏。',
+      'B': '良好的调查！你找到了主要线索，虽然有些细节仍待完善。',
+      'C': '合格的调查！你得出了正确的结论，但仍有改进空间。',
+      'D': '勉强通过...你的调查过程较为艰难，下次要更谨慎。',
+      'F': '调查失败...真相被迷雾掩盖，需要重新开始。'
+    }
+
+    let grade: ScoreGrade = 'F'
+    const thresholds = DEFAULT_SCORE_CONFIG.gradeThresholds
+    if (totalScore >= thresholds.S) grade = 'S'
+    else if (totalScore >= thresholds.A) grade = 'A'
+    else if (totalScore >= thresholds.B) grade = 'B'
+    else if (totalScore >= thresholds.C) grade = 'C'
+    else if (totalScore >= thresholds.D) grade = 'D'
+
+    addLog('conclusion', `案件评分：${grade}级 (${totalScore}分)`, {
+      breakdown: { evidenceScore, clueScore, deductionScore, timeScore, sanityScore, bonusScore, penaltyScore }
+    })
+
+    return {
+      evidenceScore,
+      clueScore,
+      deductionScore,
+      timeScore,
+      sanityScore,
+      bonusScore,
+      penaltyScore,
+      totalScore,
+      grade,
+      gradeDescription: gradeDescriptions[grade]
+    }
+  }
+
   function resetGame() {
+    stopTimer()
     resetEvents()
     gameState.value = {
       currentCase: null,
@@ -594,7 +888,19 @@ export const useGameStore = defineStore('game', () => {
       failedSearches: [],
       deductionBranches: [],
       characterProfileId: null,
-      triggeredEvents: []
+      triggeredEvents: [],
+      timerState: {
+        remainingSeconds: 0,
+        totalSeconds: 0,
+        isRunning: false,
+        isPaused: false,
+        isExpired: false,
+        timeBonusUsed: 0,
+        lastActionTime: Date.now(),
+        sceneSwitchCount: 0,
+        searchAttemptCount: 0,
+        failedSearchCount: 0
+      }
     }
   }
 
@@ -608,6 +914,10 @@ export const useGameStore = defineStore('game', () => {
     selectedTool,
     activeCharacterId,
     talentEffects,
+    timerPercentage,
+    isLowTime,
+    isCriticalTime,
+    formattedRemainingTime,
     startCase,
     modifySanity,
     calculateHitRate,
@@ -630,6 +940,14 @@ export const useGameStore = defineStore('game', () => {
     triggerRandomEvents,
     triggerEvent,
     hasTriggeredEvent,
+    startTimer,
+    pauseTimer,
+    resumeTimer,
+    stopTimer,
+    consumeTime,
+    addTimeBonus,
+    getUsedTime,
+    calculateScore,
     resetGame
   }
 })

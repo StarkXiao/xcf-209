@@ -19,6 +19,14 @@ export const cases = reactive<Case[]>([
       sanityBonus: 10,
       description: '解锁录音笔，可捕捉声音类证据'
     },
+    timeLimit: {
+      totalSeconds: 900,
+      sceneSwitchCost: 10,
+      searchAttemptCost: 5,
+      failedSearchPenalty: 15,
+      clueAnalysisCost: 8,
+      specialEventBonus: 30
+    },
     branchRewards: {
       'standard': {
         tools: ['tool-recorder'],
@@ -386,6 +394,14 @@ export const cases = reactive<Case[]>([
       sanityBonus: 15,
       description: '解锁化学分析仪，可分析微量物质证据'
     },
+    timeLimit: {
+      totalSeconds: 1200,
+      sceneSwitchCost: 12,
+      searchAttemptCost: 6,
+      failedSearchPenalty: 20,
+      clueAnalysisCost: 10,
+      specialEventBonus: 45
+    },
     branchRewards: {},
     scenes: [],
     clues: [],
@@ -428,6 +444,14 @@ export const cases = reactive<Case[]>([
       unlocksCases: [],
       sanityBonus: 25,
       description: '完成所有案件的最终奖励'
+    },
+    timeLimit: {
+      totalSeconds: 1500,
+      sceneSwitchCost: 15,
+      searchAttemptCost: 8,
+      failedSearchPenalty: 25,
+      clueAnalysisCost: 12,
+      specialEventBonus: 60
     },
     branchRewards: {},
     scenes: [],

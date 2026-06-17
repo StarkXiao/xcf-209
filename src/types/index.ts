@@ -14,6 +14,16 @@ export interface Case {
   prerequisites: string[]
   rewards: CaseRewards
   branchRewards?: Record<string, CaseRewards>
+  timeLimit: TimeLimitConfig
+}
+
+export interface TimeLimitConfig {
+  totalSeconds: number
+  sceneSwitchCost: number
+  searchAttemptCost: number
+  failedSearchPenalty: number
+  clueAnalysisCost: number
+  specialEventBonus?: number
 }
 
 export interface CaseRewards {
@@ -33,6 +43,19 @@ export interface CaseProgress {
   discoveredEvidence: string[]
   discoveredClues: string[]
   totalSanityLost: number
+  bestScore?: CaseScoreBreakdown
+  bestGrade?: ScoreGrade
+  fastestTime?: number
+  playHistory: PlayRecord[]
+}
+
+export interface PlayRecord {
+  completedAt: number
+  endingId: string
+  branch?: string
+  score: CaseScoreBreakdown
+  timeUsed: number
+  sanityLost: number
 }
 
 export interface ChapterNode {
@@ -176,7 +199,7 @@ export interface GameState {
 export interface GameLogEntry {
   id: string
   timestamp: number
-  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break'
+  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break' | 'timer' | 'scene_switch' | 'timeout' | 'penalty' | 'bonus'
   description: string
   details?: Record<string, unknown>
 }
@@ -305,6 +328,46 @@ export interface GameState {
   deductionBranches: string[]
   characterProfileId: string | null
   triggeredEvents: string[]
+  timerState: TimerState
+}
+
+export interface TimerState {
+  remainingSeconds: number
+  totalSeconds: number
+  isRunning: boolean
+  isPaused: boolean
+  isExpired: boolean
+  timeBonusUsed: number
+  lastActionTime: number
+  sceneSwitchCount: number
+  searchAttemptCount: number
+  failedSearchCount: number
+}
+
+export interface CaseScoreBreakdown {
+  evidenceScore: number
+  clueScore: number
+  deductionScore: number
+  timeScore: number
+  sanityScore: number
+  bonusScore: number
+  penaltyScore: number
+  totalScore: number
+  grade: ScoreGrade
+  gradeDescription: string
+}
+
+export type ScoreGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F'
+
+export interface CaseScoreConfig {
+  evidenceWeight: number
+  clueWeight: number
+  deductionWeight: number
+  timeWeight: number
+  sanityWeight: number
+  bonusMultiplier: number
+  penaltyMultiplier: number
+  gradeThresholds: Record<ScoreGrade, number>
 }
 
 export interface SaveData {
