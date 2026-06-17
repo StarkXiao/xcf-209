@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
@@ -37,6 +37,32 @@ const hoveredHitRate = computed<HitRateResult | null>(() => {
   if (!hoveredEvidence.value) return null
   return gameStore.calculateHitRate(hoveredEvidence.value)
 })
+
+const visibleEvidence = computed(() => {
+  if (!currentScene.value) return []
+  return currentScene.value.evidence.filter(e => gameStore.isEvidenceVisible(e))
+})
+
+const newlyUnlockedEvidence = ref<Set<string>>(new Set())
+
+function isNewlyUnlocked(evidenceId: string): boolean {
+  return newlyUnlockedEvidence.value.has(evidenceId)
+}
+
+watch(
+  () => gameStore.gameState.unlockedHiddenEvidence.length,
+  (newLen, oldLen) => {
+    if (newLen > oldLen) {
+      const unlocked = gameStore.gameState.unlockedHiddenEvidence.slice(oldLen)
+      unlocked.forEach(id => {
+        newlyUnlockedEvidence.value.add(id)
+        setTimeout(() => {
+          newlyUnlockedEvidence.value.delete(id)
+        }, 3000)
+      })
+    }
+  }
+)
 
 onMounted(() => {
   if (!caseData.value) {
@@ -347,14 +373,15 @@ function formatLogTime(timestamp: number): string {
               
               <div class="evidence-layer">
                 <div
-                  v-for="evidence in currentScene.evidence"
+                  v-for="evidence in visibleEvidence"
                   :key="evidence.id"
                   class="evidence-marker"
                   :class="{ 
                     discovered: isEvidenceDiscovered(evidence.id),
                     selected: selectedEvidence?.id === evidence.id,
                     special: evidence.isSpecial && !isEvidenceDiscovered(evidence.id),
-                    undiscoverable: !isEvidenceDiscoverable(evidence) && !isEvidenceDiscovered(evidence.id)
+                    undiscoverable: !isEvidenceDiscoverable(evidence) && !isEvidenceDiscovered(evidence.id),
+                    'newly-unlocked': isNewlyUnlocked(evidence.id)
                   }"
                   :style="getEvidencePosition(evidence)"
                   @click="clickEvidence(evidence)"
@@ -951,6 +978,17 @@ function formatLogTime(timestamp: number): string {
   border-color: #666;
 }
 
+.evidence-marker.newly-unlocked .marker-content {
+  animation: newlyUnlockedPulse 0.6s ease-out 5;
+  border-color: var(--color-success);
+  box-shadow: 0 0 15px var(--color-success);
+}
+
+@keyframes newlyUnlockedPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 15px var(--color-success); }
+  50% { transform: scale(1.2); box-shadow: 0 0 25px var(--color-success); }
+}
+
 .evidence-marker.selected .marker-content {
   transform: scale(1.3);
   box-shadow: 0 0 20px var(--color-accent);
@@ -1497,6 +1535,7 @@ function formatLogTime(timestamp: number): string {
 .log-entry.log-type-timeout { border-left-color: #f44336; }
 .log-entry.log-type-penalty { border-left-color: #e91e63; }
 .log-entry.log-type-bonus { border-left-color: #ffd700; }
+.log-entry.log-type-evidence_refresh { border-left-color: #00bcd4; }
 
 .log-footer {
   padding-top: 0.75rem;

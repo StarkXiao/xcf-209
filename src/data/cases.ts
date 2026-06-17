@@ -101,6 +101,25 @@ export const cases = reactive<Case[]>([
             requiredTool: 'tool-uv-light',
             isSpecial: true,
             hiddenClues: ['clue-deep-one']
+          },
+          {
+            id: 'evidence-secret-notes',
+            name: '秘密笔记',
+            description: '藏在灯塔顶部透镜缝隙中的一叠小纸条，上面写满了只有守望者自己能看懂的密码。破译后揭示了一个可怕的真相...',
+            type: 'document',
+            sanityEffect: -10,
+            discovered: false,
+            location: { x: 50, y: 15 },
+            size: { width: 8, height: 10 },
+            baseHitRate: 45,
+            toolBoost: ['tool-magnifier-pro'],
+            isInitiallyHidden: true,
+            isSpecial: true,
+            discoveryTrigger: {
+              type: 'clue_analyzed',
+              requiredClueId: 'clue-call'
+            },
+            hiddenClues: ['clue-truth']
           }
         ]
       },
@@ -162,6 +181,25 @@ export const cases = reactive<Case[]>([
             requiredTool: 'tool-lockpick',
             isSpecial: true,
             hiddenClues: ['clue-ritual']
+          },
+          {
+            id: 'evidence-hidden-chamber',
+            name: '暗室入口',
+            description: '壁炉后面似乎有一个隐藏的空间，边缘有新鲜的摩擦痕迹。里面可能藏着守望者最大的秘密。',
+            type: 'trace',
+            sanityEffect: -10,
+            discovered: false,
+            location: { x: 30, y: 75 },
+            size: { width: 18, height: 15 },
+            baseHitRate: 35,
+            toolBoost: ['tool-magnifier-pro', 'tool-uv-light-advanced'],
+            isInitiallyHidden: true,
+            isSpecial: true,
+            discoveryTrigger: {
+              type: 'evidence_discovered',
+              requiredEvidenceId: 'evidence-diary'
+            },
+            hiddenClues: ['clue-deep-one']
           }
         ]
       },
@@ -222,6 +260,43 @@ export const cases = reactive<Case[]>([
             requiredTool: 'tool-recorder',
             isSpecial: true,
             hiddenClues: ['clue-call-of-deep']
+          },
+          {
+            id: 'evidence-deep-statue',
+            name: '海底雕像',
+            description: '被海浪冲上岸的怪异雕像，描绘着一个有着章鱼头部和人类躯体的存在。雕像的眼睛似乎在追踪你的移动...',
+            type: 'object',
+            sanityEffect: -18,
+            discovered: false,
+            location: { x: 50, y: 75 },
+            size: { width: 12, height: 18 },
+            baseHitRate: 25,
+            toolBoost: ['tool-magnifier-pro', 'tool-chemical-analyzer'],
+            isInitiallyHidden: true,
+            isSpecial: true,
+            discoveryTrigger: {
+              type: 'scene_visited_count',
+              requiredSceneVisitCount: 3,
+              sceneId: 'scene-shore'
+            },
+            hiddenClues: ['clue-entity']
+          },
+          {
+            id: 'evidence-mysterious-scale',
+            name: '神秘鳞片',
+            description: '一块不属于任何已知生物的巨大鳞片，在月光下会散发出诡异的彩虹色光芒。',
+            type: 'trace',
+            sanityEffect: -8,
+            discovered: false,
+            location: { x: 75, y: 80 },
+            size: { width: 8, height: 10 },
+            baseHitRate: 40,
+            toolBoost: ['tool-magnifier-basic'],
+            isInitiallyHidden: true,
+            discoveryTrigger: {
+              type: 'random_after_search',
+              chance: 12
+            }
           }
         ]
       }

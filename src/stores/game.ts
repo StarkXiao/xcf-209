@@ -63,6 +63,7 @@ export const useGameStore = defineStore('game', () => {
     deductionBranches: [],
     characterProfileId: null,
     triggeredEvents: [],
+    unlockedHiddenEvidence: [],
     timerState: {
       remainingSeconds: 0,
       totalSeconds: 0,
@@ -73,7 +74,9 @@ export const useGameStore = defineStore('game', () => {
       lastActionTime: Date.now(),
       sceneSwitchCount: 0,
       searchAttemptCount: 0,
-      failedSearchCount: 0
+      failedSearchCount: 0,
+      clueAnalysisCount: 0,
+      evidenceRefreshCount: 0
     }
   })
 
@@ -169,6 +172,7 @@ export const useGameStore = defineStore('game', () => {
       deductionBranches: [],
       characterProfileId: charId,
       triggeredEvents: [],
+    unlockedHiddenEvidence: [],
       timerState: {
         remainingSeconds: timeLimit.totalSeconds,
         totalSeconds: timeLimit.totalSeconds,
@@ -179,7 +183,9 @@ export const useGameStore = defineStore('game', () => {
         lastActionTime: Date.now(),
         sceneSwitchCount: 0,
         searchAttemptCount: 0,
-        failedSearchCount: 0
+        failedSearchCount: 0,
+      clueAnalysisCount: 0,
+      evidenceRefreshCount: 0
       }
     }
 
@@ -326,6 +332,8 @@ export const useGameStore = defineStore('game', () => {
     const roll = Math.random() * 100
     const success = roll < hitRateResult.finalRate
 
+    let result: SearchResult
+    
     if (success) {
       discoverEvidence(evidence.id, evidence.sanityEffect)
       
@@ -342,7 +350,7 @@ export const useGameStore = defineStore('game', () => {
 
       addLog('tool_use', `使用 ${selectedToolData?.name || '徒手搜查'} 成功发现 ${evidence.name}`)
 
-      return {
+      result = {
         success: true,
         evidenceId: evidence.id,
         hitRate: hitRateResult.finalRate,
@@ -360,7 +368,7 @@ export const useGameStore = defineStore('game', () => {
       addLog('penalty', `搜查 ${evidence.name} 失败，额外消耗 ${failedSearchPenalty} 秒`)
       addLog('tool_use', `搜查 ${evidence.name} 失败（成功率 ${hitRateResult.finalRate}%）`)
 
-      return {
+      result = {
         success: false,
         evidenceId: evidence.id,
         hitRate: hitRateResult.finalRate,
@@ -369,6 +377,13 @@ export const useGameStore = defineStore('game', () => {
         message: '搜查失败，再试一次吧...'
       }
     }
+    
+    if (success) {
+      checkEvidenceRefresh('after_discover_evidence', { evidenceId: evidence.id })
+    }
+    checkEvidenceRefresh('after_search', { evidenceId: evidence.id, success })
+    
+    return result
   }
 
   function canDiscoverEvidence(evidence: Evidence): boolean {
@@ -410,6 +425,14 @@ export const useGameStore = defineStore('game', () => {
     if (gameState.value.analyzedClues.includes(clueId)) {
       return { success: false, bonusCluesDiscovered: [], autoConnections: [], sanitySaved: 0, extraInsight: null }
     }
+
+    if (gameState.value.timerState.isExpired) {
+      return { success: false, bonusCluesDiscovered: [], autoConnections: [], sanitySaved: 0, extraInsight: null }
+    }
+
+    const clueAnalysisCost = currentCase.value?.timeLimit?.clueAnalysisCost || 8
+    consumeTime(clueAnalysisCost, `分析线索：${clueId}`)
+    gameState.value.timerState.clueAnalysisCount++
 
     const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
     const activeProfile = characterStore.activeProfile
@@ -487,6 +510,8 @@ export const useGameStore = defineStore('game', () => {
     }
     addLog('analysis', logMessage)
     
+    checkEvidenceRefresh('after_analyze_clue', { clueId })
+    
     return { 
       success: true, 
       bonusCluesDiscovered, 
@@ -508,10 +533,105 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function isEvidenceVisible(evidence: Evidence): boolean {
+    if (!evidence.isInitiallyHidden) return true
+    return gameState.value.unlockedHiddenEvidence.includes(evidence.id)
+  }
+
+  function unlockHiddenEvidence(evidenceId: string, reason: string) {
+    if (gameState.value.unlockedHiddenEvidence.includes(evidenceId)) return false
+    
+    gameState.value.unlockedHiddenEvidence.push(evidenceId)
+    gameState.value.timerState.evidenceRefreshCount++
+    addLog('evidence_refresh', `发现新的可调查物：${evidenceId}（${reason}）`)
+    return true
+  }
+
+  function checkEvidenceRefresh(triggerType: string, _context?: Record<string, unknown>) {
+    const caseData = currentCase.value
+    if (!caseData) return
+
+    const newlyUnlocked: string[] = []
+
+    for (const scene of caseData.scenes) {
+      for (const evidence of scene.evidence) {
+        if (!evidence.isInitiallyHidden) continue
+        if (gameState.value.unlockedHiddenEvidence.includes(evidence.id)) continue
+        if (!evidence.discoveryTrigger) continue
+
+        const trigger = evidence.discoveryTrigger
+        let shouldUnlock = false
+        let unlockReason = ''
+
+        switch (trigger.type) {
+          case 'clue_analyzed':
+            if (triggerType === 'after_analyze_clue' && trigger.requiredClueId) {
+              if (gameState.value.analyzedClues.includes(trigger.requiredClueId)) {
+                shouldUnlock = true
+                unlockReason = `分析线索后解锁`
+              }
+            }
+            break
+
+          case 'evidence_discovered':
+            if (triggerType === 'after_discover_evidence' && trigger.requiredEvidenceId) {
+              if (gameState.value.discoveredEvidence.includes(trigger.requiredEvidenceId)) {
+                shouldUnlock = true
+                unlockReason = `发现关联证据后解锁`
+              }
+            }
+            break
+
+          case 'scene_visited_count':
+            if (triggerType === 'after_scene_switch' && trigger.requiredSceneVisitCount && trigger.sceneId) {
+              const visitCount = gameState.value.visitedScenes.filter(s => s === trigger.sceneId).length
+              if (visitCount >= trigger.requiredSceneVisitCount) {
+                shouldUnlock = true
+                unlockReason = `多次探索场景后解锁`
+              }
+            }
+            break
+
+          case 'search_attempt_count':
+            if (triggerType === 'after_search' && trigger.requiredSearchAttempts) {
+              if (gameState.value.timerState.searchAttemptCount >= trigger.requiredSearchAttempts) {
+                const chance = trigger.chance || 100
+                if (Math.random() * 100 < chance) {
+                  shouldUnlock = true
+                  unlockReason = `深入搜查后解锁`
+                }
+              }
+            }
+            break
+
+          case 'random_after_search':
+            if (triggerType === 'after_search') {
+              const chance = trigger.chance || 10
+              if (Math.random() * 100 < chance) {
+                shouldUnlock = true
+                unlockReason = `随机发现`
+              }
+            }
+            break
+        }
+
+        if (shouldUnlock) {
+          unlockHiddenEvidence(evidence.id, unlockReason)
+          newlyUnlocked.push(evidence.id)
+        }
+      }
+    }
+
+    return newlyUnlocked
+  }
+
   function visitScene(sceneId: string) {
     const sceneSwitchCost = currentCase.value?.timeLimit?.sceneSwitchCost || 10
-    if (!gameState.value.visitedScenes.includes(sceneId)) {
-      gameState.value.visitedScenes.push(sceneId)
+    const isFirstVisit = !gameState.value.visitedScenes.includes(sceneId)
+    
+    gameState.value.visitedScenes.push(sceneId)
+    
+    if (isFirstVisit) {
       addLog('discovery', `探索新场景：${sceneId}`)
       consumeTime(sceneSwitchCost, `首次进入场景：${sceneId}`)
       gameState.value.timerState.sceneSwitchCount++
@@ -521,9 +641,11 @@ export const useGameStore = defineStore('game', () => {
       gameState.value.timerState.sceneSwitchCount++
       triggerRandomEvents('random')
     }
-    addLog('scene_switch', `场景切换：${sceneId}，消耗时间 ${gameState.value.visitedScenes.includes(sceneId) ? Math.floor(sceneSwitchCost * 0.5) : sceneSwitchCost} 秒`)
+    addLog('scene_switch', `场景切换：${sceneId}，消耗时间 ${isFirstVisit ? sceneSwitchCost : Math.floor(sceneSwitchCost * 0.5)} 秒`)
     triggerRandomEvents('talent_based')
     triggerRandomEvents('sanity_level')
+    
+    checkEvidenceRefresh('after_scene_switch', { sceneId })
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -803,6 +925,12 @@ export const useGameStore = defineStore('game', () => {
     )
     bonusScore += specialEvidenceCount * 5
     
+    const hiddenEvidenceCount = caseData.scenes.reduce(
+      (sum, s) => sum + s.evidence.filter(e => e.isInitiallyHidden && gameState.value.discoveredEvidence.includes(e.id)).length,
+      0
+    )
+    bonusScore += hiddenEvidenceCount * 8
+    
     const unlockedBranches = gameState.value.deductionBranches.length
     bonusScore += unlockedBranches * 8
     
@@ -889,6 +1017,7 @@ export const useGameStore = defineStore('game', () => {
       deductionBranches: [],
       characterProfileId: null,
       triggeredEvents: [],
+    unlockedHiddenEvidence: [],
       timerState: {
         remainingSeconds: 0,
         totalSeconds: 0,
@@ -899,7 +1028,9 @@ export const useGameStore = defineStore('game', () => {
         lastActionTime: Date.now(),
         sceneSwitchCount: 0,
         searchAttemptCount: 0,
-        failedSearchCount: 0
+        failedSearchCount: 0,
+      clueAnalysisCount: 0,
+      evidenceRefreshCount: 0
       }
     }
   }
@@ -927,6 +1058,9 @@ export const useGameStore = defineStore('game', () => {
     discoverClue,
     analyzeClue,
     addClueConnection,
+    isEvidenceVisible,
+    unlockHiddenEvidence,
+    checkEvidenceRefresh,
     visitScene,
     selectTool,
     addTool,

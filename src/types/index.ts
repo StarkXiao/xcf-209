@@ -94,6 +94,18 @@ export interface Evidence {
   baseHitRate: number
   isSpecial?: boolean
   hiddenClues?: string[]
+  isInitiallyHidden?: boolean
+  discoveryTrigger?: EvidenceDiscoveryTrigger
+}
+
+export interface EvidenceDiscoveryTrigger {
+  type: 'clue_analyzed' | 'evidence_discovered' | 'scene_visited_count' | 'search_attempt_count' | 'random_after_search'
+  requiredClueId?: string
+  requiredEvidenceId?: string
+  requiredSceneVisitCount?: number
+  requiredSearchAttempts?: number
+  chance?: number
+  sceneId?: string
 }
 
 export interface Clue {
@@ -199,7 +211,7 @@ export interface GameState {
 export interface GameLogEntry {
   id: string
   timestamp: number
-  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break' | 'timer' | 'scene_switch' | 'timeout' | 'penalty' | 'bonus'
+  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break' | 'timer' | 'scene_switch' | 'timeout' | 'penalty' | 'bonus' | 'evidence_refresh'
   description: string
   details?: Record<string, unknown>
 }
@@ -328,6 +340,7 @@ export interface GameState {
   deductionBranches: string[]
   characterProfileId: string | null
   triggeredEvents: string[]
+  unlockedHiddenEvidence: string[]
   timerState: TimerState
 }
 
@@ -342,6 +355,8 @@ export interface TimerState {
   sceneSwitchCount: number
   searchAttemptCount: number
   failedSearchCount: number
+  clueAnalysisCount: number
+  evidenceRefreshCount: number
 }
 
 export interface CaseScoreBreakdown {
