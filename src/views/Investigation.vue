@@ -24,6 +24,21 @@ const caseData = computed(() => {
   return getCaseById(caseId)
 })
 
+const hasHallucinations = computed(() => {
+  return gameStore.activeHallucinations.length > 0
+})
+
+const hallucinationIntensity = computed(() => {
+  if (gameStore.activeHallucinations.length === 0) return 0
+  return Math.max(...gameStore.activeHallucinations.map(h => h.intensity))
+})
+
+const currentHallucinationMessage = computed(() => {
+  if (gameStore.activeHallucinations.length === 0) return ''
+  const latest = gameStore.activeHallucinations[gameStore.activeHallucinations.length - 1]
+  return latest.message || ''
+})
+
 const sceneBackgrounds: Record<string, string> = {
   lighthouse: 'linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
   cottage: 'linear-gradient(180deg, #2d132c 0%, #1a1a2e 50%, #0a0a0f 100%)',
@@ -225,6 +240,19 @@ function formatLogTime(timestamp: number): string {
   const date = new Date(timestamp)
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+
+function getShadowStyle(index: number) {
+  const left = 10 + (index * 18) + Math.random() * 10
+  const top = 20 + Math.random() * 60
+  const delay = index * 0.5 + Math.random() * 2
+  const duration = 3 + Math.random() * 4
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    animationDelay: `${delay}s`,
+    animationDuration: `${duration}s`
+  }
+}
 </script>
 
 <template>
@@ -368,8 +396,27 @@ function formatLogTime(timestamp: number): string {
             <div 
               class="scene-background"
               :style="{ background: sceneBackgrounds[currentScene.background] || sceneBackgrounds.lighthouse }"
+              :class="{ 
+                'hallucination-distortion': hasHallucinations && hallucinationIntensity >= 3,
+                'hallucination-shadow': hasHallucinations && hallucinationIntensity >= 1,
+                'hallucination-critical': hasHallucinations && hallucinationIntensity >= 4
+              }"
             >
-              <div class="scene-description">{{ currentScene.description }}</div>
+              <div v-if="hasHallucinations" class="hallucination-overlay" :class="`intensity-${hallucinationIntensity}`">
+                <div class="hallucination-vignette"></div>
+                <div class="hallucination-noise"></div>
+                <div v-if="hallucinationIntensity >= 2" class="hallucination-shadows">
+                  <div v-for="i in 5" :key="i" class="shadow-figure" :style="getShadowStyle(i)"></div>
+                </div>
+              </div>
+              
+              <transition name="fade">
+                <div v-if="currentHallucinationMessage" class="hallucination-message">
+                  {{ currentHallucinationMessage }}
+                </div>
+              </transition>
+              
+              <div class="scene-description" :class="{ 'text-corrupted': hasHallucinations && hallucinationIntensity >= 4 }">{{ currentScene.description }}</div>
               
               <div class="evidence-layer">
                 <div
@@ -1609,6 +1656,152 @@ function formatLogTime(timestamp: number): string {
 .primary-btn:hover {
   background: var(--color-accent-light);
   transform: translateY(-2px);
+}
+
+.hallucination-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 50;
+  overflow: hidden;
+}
+
+.hallucination-vignette {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(0, 0, 0, 0.6) 100%);
+  animation: vignettePulse 4s ease-in-out infinite;
+}
+
+.intensity-1 .hallucination-vignette { opacity: 0.3; }
+.intensity-2 .hallucination-vignette { opacity: 0.5; }
+.intensity-3 .hallucination-vignette { opacity: 0.7; }
+.intensity-4 .hallucination-vignette { opacity: 0.85; }
+
+@keyframes vignettePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.hallucination-noise {
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  right: -50%;
+  bottom: -50%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.08;
+  animation: noiseMove 0.5s steps(10) infinite;
+}
+
+.intensity-1 .hallucination-noise { opacity: 0.05; }
+.intensity-2 .hallucination-noise { opacity: 0.1; }
+.intensity-3 .hallucination-noise { opacity: 0.15; }
+.intensity-4 .hallucination-noise { opacity: 0.25; }
+
+@keyframes noiseMove {
+  0% { transform: translate(0, 0); }
+  10% { transform: translate(-5%, -5%); }
+  20% { transform: translate(-10%, 5%); }
+  30% { transform: translate(5%, -10%); }
+  40% { transform: translate(-5%, 15%); }
+  50% { transform: translate(-10%, 5%); }
+  60% { transform: translate(15%, 0); }
+  70% { transform: translate(0, 10%); }
+  80% { transform: translate(-15%, 0); }
+  90% { transform: translate(10%, 5%); }
+  100% { transform: translate(5%, 0); }
+}
+
+.hallucination-shadows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.shadow-figure {
+  position: absolute;
+  width: 40px;
+  height: 80px;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.6) 0%, transparent 70%);
+  filter: blur(8px);
+  animation: shadowFloat 5s ease-in-out infinite;
+  opacity: 0;
+}
+
+@keyframes shadowFloat {
+  0% { opacity: 0; transform: translateY(0) scale(1); }
+  20% { opacity: 0.7; }
+  50% { opacity: 0.4; transform: translateY(-20px) scale(1.1); }
+  80% { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(0) scale(1); }
+}
+
+.hallucination-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1rem 2rem;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--color-accent);
+  border-radius: 8px;
+  color: var(--color-accent-light);
+  font-style: italic;
+  font-size: 1.1rem;
+  text-align: center;
+  z-index: 60;
+  text-shadow: 0 0 10px var(--color-accent);
+  animation: messageFlicker 0.1s ease-in-out infinite alternate;
+}
+
+@keyframes messageFlicker {
+  from { opacity: 0.8; }
+  to { opacity: 1; }
+}
+
+.scene-background.hallucination-distortion {
+  animation: sceneDistort 8s ease-in-out infinite;
+}
+
+@keyframes sceneDistort {
+  0%, 100% { filter: none; transform: scale(1); }
+  25% { filter: hue-rotate(10deg) saturate(1.2); }
+  50% { filter: hue-rotate(-5deg) saturate(0.8) blur(1px); transform: scale(1.02); }
+  75% { filter: hue-rotate(5deg) saturate(1.1); }
+}
+
+.scene-background.hallucination-shadow {
+  box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.5);
+}
+
+.scene-background.hallucination-critical {
+  animation: criticalShake 0.3s ease-in-out infinite;
+}
+
+@keyframes criticalShake {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-2px, 1px); }
+  50% { transform: translate(2px, -1px); }
+  75% { transform: translate(-1px, 2px); }
+}
+
+.text-corrupted {
+  animation: textCorrupt 0.5s ease-in-out infinite alternate;
+  filter: blur(0.5px);
+}
+
+@keyframes textCorrupt {
+  0% { letter-spacing: 0; opacity: 0.9; }
+  100% { letter-spacing: 1px; opacity: 0.7; }
 }
 
 @media (max-width: 1024px) {

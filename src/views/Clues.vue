@@ -27,10 +27,27 @@ const caseData = computed(() => {
 
 const discoveredClues = computed(() => {
   if (!caseData.value) return []
-  return caseData.value.clues.filter(c => 
-    gameStore.gameState.discoveredClues.includes(c.id)
+  const realClues = caseData.value.clues.filter(c => 
+    gameStore.gameState.discoveredClues.includes(c.id) && !gameStore.isFakeClue(c.id)
   )
+  const fakeClues = gameStore.activeMisleadingClues.map(fake => ({
+    id: fake.fakeClueId,
+    name: fake.fakeClueName,
+    description: fake.fakeClueDescription,
+    type: fake.fakeClueType,
+    source: '记忆碎片',
+    connections: fake.fakeConnections,
+    importance: 2,
+    discovered: true,
+    analyzed: false,
+    isFake: true
+  }))
+  return [...realClues, ...fakeClues]
 })
+
+const isFakeClue = (clueId: string) => {
+  return gameStore.isFakeClue(clueId)
+}
 
 const analyzedClues = computed(() => {
   return discoveredClues.value.filter(c => 
@@ -158,6 +175,15 @@ function goToInvestigation() {
 function goToDeduction() {
   router.push(`/deduction/${caseData.value?.id}`)
 }
+
+function disproveClue(clueId: string) {
+  if (confirm('确定要证伪这条线索吗？如果这是真实的线索，证伪会消耗理智。')) {
+    const success = gameStore.disproveMisleadingClue(clueId)
+    if (success) {
+      selectedClue.value = null
+    }
+  }
+}
 </script>
 
 <template>
@@ -194,13 +220,15 @@ function goToDeduction() {
                 :class="{ 
                   selected: selectedClue?.id === clue.id,
                   connecting: connectingFrom === clue.id,
-                  'can-connect': connectingFrom && connectingFrom !== clue.id
+                  'can-connect': connectingFrom && connectingFrom !== clue.id,
+                  'fake-clue': isFakeClue(clue.id)
                 }"
                 @click="handleClueClick(clue)"
               >
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
-                  <span 
+                  <span v-if="isFakeClue(clue.id)" class="fake-badge">👻 幻觉</span>
+                  <span v-else 
                     class="importance-badge"
                     :style="{ backgroundColor: getImportanceColor(clue.importance) }"
                   >
@@ -222,13 +250,15 @@ function goToDeduction() {
                 :class="{ 
                   selected: selectedClue?.id === clue.id,
                   connecting: connectingFrom === clue.id,
-                  'can-connect': connectingFrom && connectingFrom !== clue.id
+                  'can-connect': connectingFrom && connectingFrom !== clue.id,
+                  'fake-clue': isFakeClue(clue.id)
                 }"
                 @click="handleClueClick(clue)"
               >
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
-                  <span class="analyzed-badge">✓</span>
+                  <span v-if="isFakeClue(clue.id)" class="fake-badge">👻 幻觉</span>
+                  <span v-else class="analyzed-badge">✓</span>
                 </div>
                 <div class="clue-type">{{ clue.type }}</div>
               </div>
@@ -294,13 +324,21 @@ function goToDeduction() {
 
             <div class="detail-actions">
               <button 
-                v-if="!isClueAnalyzed(selectedClue.id)"
+                v-if="!isClueAnalyzed(selectedClue.id) && !isFakeClue(selectedClue.id)"
                 class="analyze-btn primary"
                 @click="analyzeClue(selectedClue)"
               >
                 🔬 分析线索
               </button>
               <button 
+                v-if="isFakeClue(selectedClue.id)"
+                class="disprove-btn warning"
+                @click="disproveClue(selectedClue.id)"
+              >
+                🚫 证伪线索
+              </button>
+              <button 
+                v-if="!isFakeClue(selectedClue.id)"
                 class="connect-btn"
                 :class="{ active: connectingFrom === selectedClue.id }"
                 @click="startConnection(selectedClue.id)"
@@ -882,6 +920,59 @@ function goToDeduction() {
   border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
   font-size: 0.85rem;
+}
+
+.clue-item.fake-clue {
+  border-style: dashed;
+  border-color: #9c27b0;
+  background: rgba(156, 39, 176, 0.1);
+  animation: fakeCluePulse 3s ease-in-out infinite;
+}
+
+@keyframes fakeCluePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.fake-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  background: linear-gradient(135deg, #9c27b0, #673ab7);
+  border-radius: 10px;
+  color: white;
+  font-weight: bold;
+}
+
+.disprove-btn {
+  flex: 1;
+  padding: 0.75rem;
+  background: var(--color-warning);
+  border: 1px solid var(--color-warning);
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+}
+
+.disprove-btn:hover {
+  background: #e65100;
+  border-color: #e65100;
+}
+
+.disprove-btn.warning {
+  background: linear-gradient(135deg, #ff5722, #e64a19);
+}
+
+.clue-detail .fake-clue-warning {
+  padding: 0.75rem;
+  background: rgba(156, 39, 176, 0.15);
+  border: 1px dashed #9c27b0;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  color: #ce93d8;
+  font-size: 0.9rem;
+  font-style: italic;
 }
 
 @media (max-width: 1024px) {

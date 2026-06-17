@@ -32,6 +32,30 @@ const caseData = computed(() => {
   return getCaseById(caseId)
 })
 
+const allConclusionOptions = computed(() => {
+  if (!caseData.value) return []
+  
+  const realOptions = caseData.value.conclusion.options
+  
+  const fakeOptions = gameStore.activeFakeDeductions.map(fake => ({
+    id: fake.fakeOptionId,
+    text: fake.fakeOptionText,
+    isCorrect: false,
+    sanityCost: fake.fakeSanityCost,
+    feedback: '这是你混乱心智产生的幻觉，并非正确的结论。',
+    isFake: true,
+    requiredTools: [] as string[],
+    requiredEvidence: fake.fakeRequiredEvidence || [],
+    branch: undefined as string | undefined
+  }))
+  
+  return [...realOptions, ...fakeOptions]
+})
+
+const isFakeOption = (optionId: string) => {
+  return gameStore.isFakeDeductionOption(optionId)
+}
+
 const hasEnoughEvidence = computed(() => {
   if (!caseData.value) return false
   const requiredEvidence = caseData.value.conclusion.evidence
@@ -251,6 +275,15 @@ function formatTime(seconds: number): string {
   const secs = seconds % 60
   return `${mins}分${secs}秒`
 }
+
+function disproveOption(optionId: string) {
+  if (confirm('确定要证伪这个推演选项吗？如果这是真实的选项，证伪会消耗理智。')) {
+    const success = gameStore.disproveFakeDeduction(optionId)
+    if (success && selectedConclusion.value === optionId) {
+      selectedConclusion.value = null
+    }
+  }
+}
 </script>
 
 <template>
@@ -363,22 +396,26 @@ function formatTime(seconds: number): string {
 
           <div class="options-list">
             <div
-              v-for="option in caseData.conclusion.options"
+              v-for="(option, index) in allConclusionOptions"
               :key="option.id"
               class="option-item"
               :class="{ 
                 selected: selectedConclusion === option.id,
                 disabled: !isOptionAvailable(option),
-                'branch-option': option.branch
+                'branch-option': option.branch,
+                'fake-option': isFakeOption(option.id)
               }"
               @click="selectOption(option)"
             >
               <div class="option-header">
-                <span class="option-number">{{ caseData.conclusion.options.indexOf(option) + 1 }}</span>
+                <span class="option-number">{{ index + 1 }}</span>
                 <div class="option-text-wrapper">
                   <span class="option-text">{{ option.text }}</span>
                   <span v-if="option.branch" class="branch-tag">
                     {{ getBranchInfo(option.branch).name }}
+                  </span>
+                  <span v-if="isFakeOption(option.id)" class="fake-option-tag">
+                    👻 幻觉
                   </span>
                 </div>
               </div>
@@ -386,7 +423,7 @@ function formatTime(seconds: number): string {
                 <span class="sanity-cost">理智消耗: {{ option.sanityCost }}</span>
               </div>
 
-              <div v-if="!isOptionAvailable(option)" class="locked-reason">
+              <div v-if="!isOptionAvailable(option) && !isFakeOption(option.id)" class="locked-reason">
                 <p class="locked-title">🔒 需要满足以下条件:</p>
                 <ul v-if="getMissingRequirements(option).tools.length > 0">
                   <li>工具: {{ getMissingRequirements(option).tools.join('、') }}</li>
@@ -394,6 +431,13 @@ function formatTime(seconds: number): string {
                 <ul v-if="getMissingRequirements(option).evidence.length > 0">
                   <li>特殊证据: {{ getMissingRequirements(option).evidence.join('、') }}</li>
                 </ul>
+              </div>
+              
+              <div v-if="isFakeOption(option.id)" class="fake-option-hint">
+                <p class="fake-title">👻 这似乎是幻觉产生的选项</p>
+                <button class="disprove-btn small" @click.stop="disproveOption(option.id)">
+                  🚫 证伪这个选项
+                </button>
               </div>
             </div>
           </div>
@@ -917,9 +961,62 @@ function formatTime(seconds: number): string {
   border-left: 4px solid #ffd700;
 }
 
+.option-item.fake-option {
+  border-style: dashed;
+  border-color: #9c27b0;
+  background: rgba(156, 39, 176, 0.1);
+  animation: fakeOptionPulse 3s ease-in-out infinite;
+}
+
+@keyframes fakeOptionPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
 .option-item.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.fake-option-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: linear-gradient(135deg, #9c27b0, #673ab7);
+  color: white;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  width: fit-content;
+  margin-top: 0.25rem;
+}
+
+.fake-option-hint {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #9c27b0;
+}
+
+.fake-title {
+  font-size: 0.85rem;
+  color: #ce93d8;
+  margin-bottom: 0.5rem;
+  font-style: italic;
+}
+
+.disprove-btn.small {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  background: linear-gradient(135deg, #ff5722, #e64a19);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.disprove-btn.small:hover {
+  background: linear-gradient(135deg, #ff7043, #f4511e);
+  transform: translateY(-1px);
 }
 
 .option-header {

@@ -397,3 +397,93 @@ export interface SaveData {
   inheritedTools?: string[]
   characterProfileId?: string
 }
+
+export type AnomalyEventType = 'hallucination' | 'misleading_clue' | 'extra_log' | 'deduction_candidate'
+
+export type SanityTier = 'normal' | 'mild' | 'moderate' | 'severe' | 'critical'
+
+export interface AnomalyEvent {
+  id: string
+  name: string
+  description: string
+  type: AnomalyEventType
+  sanityTier: SanityTier
+  triggerChance: number
+  cooldown: number
+  effects: AnomalyEffect
+  triggered: boolean
+  lastTriggeredAt?: number
+}
+
+export interface AnomalyEffect {
+  hallucination?: HallucinationEffect
+  misleadingClue?: MisleadingClue
+  extraLog?: ExtraLogEntry
+  deductionCandidate?: DeductionCandidateChange
+}
+
+export interface HallucinationEffect {
+  visualType: 'shadow' | 'distortion' | 'phantom' | 'text_corruption'
+  intensity: number
+  duration: number
+  message?: string
+}
+
+export interface MisleadingClue {
+  fakeClueId: string
+  fakeClueName: string
+  fakeClueDescription: string
+  fakeClueType: Clue['type']
+  fakeConnections: string[]
+  expiresAt?: number
+  isDisproven: boolean
+}
+
+export interface ExtraLogEntry {
+  logType: GameLogEntry['type']
+  description: string
+  details?: Record<string, unknown>
+  isFake: boolean
+}
+
+export interface DeductionCandidateChange {
+  fakeOptionId: string
+  fakeOptionText: string
+  fakeSanityCost: number
+  fakeRequiredEvidence?: string[]
+  isDisproven: boolean
+  expiresAt?: number
+}
+
+export interface AnomalyState {
+  activeHallucinations: HallucinationEffect[]
+  activeMisleadingClues: MisleadingClue[]
+  activeFakeLogs: ExtraLogEntry[]
+  activeFakeDeductions: DeductionCandidateChange[]
+  anomalyEventHistory: string[]
+  lastAnomalyCheck: number
+  anomalyCooldowns: Record<string, number>
+}
+
+export interface GameState {
+  currentCase: string | null
+  sanity: number
+  maxSanity: number
+  discoveredEvidence: string[]
+  discoveredClues: string[]
+  analyzedClues: string[]
+  clueConnections: ClueConnection[]
+  visitedScenes: string[]
+  gameLog: GameLogEntry[]
+  startTime: number
+  lastSaveTime: number
+  tools: Tool[]
+  selectedToolId: string | null
+  failedSearches: string[]
+  deductionBranches: string[]
+  characterProfileId: string | null
+  triggeredEvents: string[]
+  unlockedHiddenEvidence: string[]
+  timerState: TimerState
+  anomalyState: AnomalyState
+}

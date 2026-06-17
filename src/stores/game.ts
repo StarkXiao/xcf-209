@@ -1,11 +1,18 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
+import { 
+  getAvailableAnomalyEvents, 
+  checkAnomalyTrigger, 
+  createInitialAnomalyState, 
+  resetAnomalyEvents,
+  getSanityTier 
+} from '@/data/anomalyEvents'
 
 let timerInterval: ReturnType<typeof setInterval> | null = null
 
@@ -77,7 +84,8 @@ export const useGameStore = defineStore('game', () => {
       failedSearchCount: 0,
       clueAnalysisCount: 0,
       evidenceRefreshCount: 0
-    }
+    },
+    anomalyState: createInitialAnomalyState()
   })
 
   const currentCase = computed(() => {
@@ -172,7 +180,7 @@ export const useGameStore = defineStore('game', () => {
       deductionBranches: [],
       characterProfileId: charId,
       triggeredEvents: [],
-    unlockedHiddenEvidence: [],
+      unlockedHiddenEvidence: [],
       timerState: {
         remainingSeconds: timeLimit.totalSeconds,
         totalSeconds: timeLimit.totalSeconds,
@@ -184,9 +192,10 @@ export const useGameStore = defineStore('game', () => {
         sceneSwitchCount: 0,
         searchAttemptCount: 0,
         failedSearchCount: 0,
-      clueAnalysisCount: 0,
-      evidenceRefreshCount: 0
-      }
+        clueAnalysisCount: 0,
+        evidenceRefreshCount: 0
+      },
+      anomalyState: createInitialAnomalyState()
     }
 
     startTimer()
@@ -233,6 +242,10 @@ export const useGameStore = defineStore('game', () => {
     }
     
     gameState.value.sanity = Math.max(0, Math.min(gameState.value.maxSanity, gameState.value.sanity + finalAmount))
+
+    if (amount < 0) {
+      checkAnomalyEvents()
+    }
 
     if (gameState.value.sanity <= 0) {
       return 'insane'
@@ -701,6 +714,211 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.triggeredEvents.includes(eventId)
   }
 
+  const sanityTier = computed(() => {
+    return getSanityTier(gameState.value.sanity, gameState.value.maxSanity)
+  })
+
+  const activeHallucinations = computed(() => {
+    return gameState.value.anomalyState.activeHallucinations
+  })
+
+  const activeMisleadingClues = computed(() => {
+    return gameState.value.anomalyState.activeMisleadingClues.filter(c => !c.isDisproven)
+  })
+
+  const activeFakeDeductions = computed(() => {
+    return gameState.value.anomalyState.activeFakeDeductions.filter(d => !d.isDisproven)
+  })
+
+  function checkAnomalyEvents() {
+    const now = Date.now()
+    const anomalyState = gameState.value.anomalyState
+    
+    if (now - anomalyState.lastAnomalyCheck < 5000) return
+    
+    anomalyState.lastAnomalyCheck = now
+    
+    const availableEvents = getAvailableAnomalyEvents(
+      gameState.value.sanity,
+      gameState.value.maxSanity,
+      anomalyState.anomalyCooldowns,
+      now
+    )
+    
+    const eventTriggerBonus = talentEffects.value.eventTriggerChance
+    
+    for (const event of availableEvents) {
+      if (checkAnomalyTrigger(event, gameState.value.sanity, gameState.value.maxSanity, eventTriggerBonus)) {
+        triggerAnomalyEvent(event)
+        break
+      }
+    }
+    
+    cleanupExpiredAnomalies()
+  }
+
+  function triggerAnomalyEvent(event: AnomalyEvent): boolean {
+    const anomalyState = gameState.value.anomalyState
+    
+    if (anomalyState.anomalyEventHistory.includes(event.id)) {
+      const lastTriggered = anomalyState.anomalyCooldowns[event.id] || 0
+      if (Date.now() - lastTriggered < event.cooldown) return false
+    }
+    
+    event.triggered = true
+    event.lastTriggeredAt = Date.now()
+    anomalyState.anomalyEventHistory.push(event.id)
+    anomalyState.anomalyCooldowns[event.id] = Date.now()
+    
+    addLog('discovery', `⚠️ ${event.name}`)
+    addLog('discovery', event.description)
+    
+    if (event.effects.hallucination) {
+      addHallucination(event.effects.hallucination)
+    }
+    
+    if (event.effects.misleadingClue) {
+      addMisleadingClue(event.effects.misleadingClue)
+    }
+    
+    if (event.effects.extraLog) {
+      addFakeLog(event.effects.extraLog)
+    }
+    
+    if (event.effects.deductionCandidate) {
+      addFakeDeduction(event.effects.deductionCandidate)
+    }
+    
+    return true
+  }
+
+  function addHallucination(hallucination: HallucinationEffect) {
+    gameState.value.anomalyState.activeHallucinations.push({
+      ...hallucination,
+      duration: hallucination.duration
+    })
+    
+    setTimeout(() => {
+      removeHallucination(hallucination)
+    }, hallucination.duration)
+  }
+
+  function removeHallucination(hallucination: HallucinationEffect) {
+    const index = gameState.value.anomalyState.activeHallucinations.findIndex(
+      h => h.visualType === hallucination.visualType && h.intensity === hallucination.intensity
+    )
+    if (index > -1) {
+      gameState.value.anomalyState.activeHallucinations.splice(index, 1)
+    }
+  }
+
+  function addMisleadingClue(clue: MisleadingClue) {
+    const exists = gameState.value.anomalyState.activeMisleadingClues.some(
+      c => c.fakeClueId === clue.fakeClueId && !c.isDisproven
+    )
+    if (exists) return
+    
+    gameState.value.anomalyState.activeMisleadingClues.push({ ...clue })
+    gameState.value.discoveredClues.push(clue.fakeClueId)
+    
+    addLog('discovery', `获得新线索：${clue.fakeClueName}`)
+  }
+
+  function disproveMisleadingClue(clueId: string): boolean {
+    const clue = gameState.value.anomalyState.activeMisleadingClues.find(
+      c => c.fakeClueId === clueId
+    )
+    if (!clue) return false
+    
+    clue.isDisproven = true
+    
+    const index = gameState.value.discoveredClues.indexOf(clueId)
+    if (index > -1) {
+      gameState.value.discoveredClues.splice(index, 1)
+    }
+    
+    addLog('discovery', `证实线索为幻觉：${clue.fakeClueName}`)
+    modifySanity(5, '证伪幻觉线索')
+    
+    return true
+  }
+
+  function addFakeLog(fakeLog: { logType: GameLogEntry['type']; description: string; details?: Record<string, unknown>; isFake: boolean }) {
+    const entry: GameLogEntry = {
+      id: `log-fake-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now() - Math.floor(Math.random() * 60000),
+      type: fakeLog.logType,
+      description: fakeLog.description,
+      details: { ...fakeLog.details, isFake: true }
+    }
+    gameState.value.gameLog.push(entry)
+    gameState.value.anomalyState.activeFakeLogs.push(fakeLog)
+  }
+
+  function addFakeDeduction(deduction: DeductionCandidateChange) {
+    const exists = gameState.value.anomalyState.activeFakeDeductions.some(
+      d => d.fakeOptionId === deduction.fakeOptionId && !d.isDisproven
+    )
+    if (exists) return
+    
+    gameState.value.anomalyState.activeFakeDeductions.push({ ...deduction })
+  }
+
+  function disproveFakeDeduction(optionId: string): boolean {
+    const deduction = gameState.value.anomalyState.activeFakeDeductions.find(
+      d => d.fakeOptionId === optionId
+    )
+    if (!deduction) return false
+    
+    deduction.isDisproven = true
+    addLog('discovery', `证伪推演选项：${deduction.fakeOptionText}`)
+    modifySanity(3, '证伪虚假推演')
+    
+    return true
+  }
+
+  function isFakeClue(clueId: string): boolean {
+    return gameState.value.anomalyState.activeMisleadingClues.some(
+      c => c.fakeClueId === clueId && !c.isDisproven
+    )
+  }
+
+  function isFakeDeductionOption(optionId: string): boolean {
+    return gameState.value.anomalyState.activeFakeDeductions.some(
+      d => d.fakeOptionId === optionId && !d.isDisproven
+    )
+  }
+
+  function cleanupExpiredAnomalies() {
+    const now = Date.now()
+    
+    gameState.value.anomalyState.activeMisleadingClues = 
+      gameState.value.anomalyState.activeMisleadingClues.filter(c => {
+        if (c.expiresAt && now > c.expiresAt) {
+          const index = gameState.value.discoveredClues.indexOf(c.fakeClueId)
+          if (index > -1) {
+            gameState.value.discoveredClues.splice(index, 1)
+          }
+          return false
+        }
+        return true
+      })
+    
+    gameState.value.anomalyState.activeFakeDeductions = 
+      gameState.value.anomalyState.activeFakeDeductions.filter(d => {
+        if (d.expiresAt && now > d.expiresAt) {
+          return false
+        }
+        return true
+      })
+  }
+
+  function getMisleadingClueById(clueId: string): MisleadingClue | undefined {
+    return gameState.value.anomalyState.activeMisleadingClues.find(
+      c => c.fakeClueId === clueId
+    )
+  }
+
   function selectTool(toolId: string | null) {
     if (toolId === null) {
       gameState.value.selectedToolId = null
@@ -999,6 +1217,7 @@ export const useGameStore = defineStore('game', () => {
   function resetGame() {
     stopTimer()
     resetEvents()
+    resetAnomalyEvents()
     gameState.value = {
       currentCase: null,
       sanity: 100,
@@ -1017,7 +1236,7 @@ export const useGameStore = defineStore('game', () => {
       deductionBranches: [],
       characterProfileId: null,
       triggeredEvents: [],
-    unlockedHiddenEvidence: [],
+      unlockedHiddenEvidence: [],
       timerState: {
         remainingSeconds: 0,
         totalSeconds: 0,
@@ -1029,9 +1248,10 @@ export const useGameStore = defineStore('game', () => {
         sceneSwitchCount: 0,
         searchAttemptCount: 0,
         failedSearchCount: 0,
-      clueAnalysisCount: 0,
-      evidenceRefreshCount: 0
-      }
+        clueAnalysisCount: 0,
+        evidenceRefreshCount: 0
+      },
+      anomalyState: createInitialAnomalyState()
     }
   }
 
@@ -1049,6 +1269,10 @@ export const useGameStore = defineStore('game', () => {
     isLowTime,
     isCriticalTime,
     formattedRemainingTime,
+    sanityTier,
+    activeHallucinations,
+    activeMisleadingClues,
+    activeFakeDeductions,
     startCase,
     modifySanity,
     calculateHitRate,
@@ -1074,6 +1298,13 @@ export const useGameStore = defineStore('game', () => {
     triggerRandomEvents,
     triggerEvent,
     hasTriggeredEvent,
+    checkAnomalyEvents,
+    triggerAnomalyEvent,
+    disproveMisleadingClue,
+    disproveFakeDeduction,
+    isFakeClue,
+    isFakeDeductionOption,
+    getMisleadingClueById,
     startTimer,
     pauseTimer,
     resumeTimer,
