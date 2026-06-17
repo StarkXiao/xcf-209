@@ -176,6 +176,10 @@ function goToDeduction() {
   router.push(`/deduction/${caseData.value?.id}`)
 }
 
+function goToGraph() {
+  router.push(`/graph/${caseData.value?.id}`)
+}
+
 function disproveClue(clueId: string) {
   if (confirm('确定要证伪这条线索吗？如果这是真实的线索，证伪会消耗理智。')) {
     const success = gameStore.disproveMisleadingClue(clueId)
@@ -201,6 +205,9 @@ function disproveClue(clueId: string) {
         <div class="header-actions">
           <button class="action-btn" @click="goToInvestigation">
             <span>🔍</span> 继续搜证
+          </button>
+          <button class="action-btn" @click="goToGraph">
+            <span>🕸️</span> 关系图谱
           </button>
           <button class="action-btn primary" @click="goToDeduction">
             <span>💡</span> 真相推演

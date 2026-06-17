@@ -647,3 +647,98 @@ export interface BestiaryProgress {
     unlockMethod: string
   }[]
 }
+
+export interface GraphNode {
+  id: string
+  type: 'clue' | 'evidence' | 'character' | 'location'
+  label: string
+  description?: string
+  x: number
+  y: number
+  width: number
+  height: number
+  importance?: number
+  color?: string
+  isSelected?: boolean
+  isHighlighted?: boolean
+  isDimmed?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export interface GraphEdge {
+  id: string
+  sourceId: string
+  targetId: string
+  relationship: string
+  confidence: number
+  confirmed: boolean
+  isError?: boolean
+  errorMessage?: string
+  createdAt: number
+  createdBy?: string
+}
+
+export interface GraphValidationResult {
+  isValid: boolean
+  errors: GraphValidationError[]
+  warnings: GraphValidationWarning[]
+}
+
+export interface GraphValidationError {
+  edgeId: string
+  sourceId: string
+  targetId: string
+  message: string
+  type: 'invalid_connection' | 'circular_reference' | 'conflicting_relationship' | 'missing_data'
+}
+
+export interface GraphValidationWarning {
+  edgeId?: string
+  nodeId?: string
+  message: string
+  type: 'unconfirmed' | 'low_confidence' | 'isolated_node' | 'potential_connection'
+}
+
+export interface GraphAction {
+  type: 'node_add' | 'node_move' | 'node_remove' | 'edge_add' | 'edge_remove' | 'edge_update' | 'layout_reset'
+  timestamp: number
+  data: Record<string, unknown>
+  beforeState?: Record<string, unknown>
+  afterState?: Record<string, unknown>
+}
+
+export interface GraphState {
+  caseId: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  actionHistory: GraphAction[]
+  currentHistoryIndex: number
+  zoom: number
+  pan: { x: number; y: number }
+  lastSavedAt: number
+  lastAutoSavedAt: number
+}
+
+export interface GraphPlaybackState {
+  isPlaying: boolean
+  currentStep: number
+  totalSteps: number
+  speed: number
+  isPaused: boolean
+  intervalId: number | null
+}
+
+export const RELATIONSHIP_TYPES = [
+  'causes',
+  'implies',
+  'supports',
+  'contradicts',
+  'related_to',
+  'provides_evidence_for',
+  'leads_to',
+  'is_part_of',
+  'is_member_of',
+  'is_located_at'
+] as const
+
+export type RelationshipType = typeof RELATIONSHIP_TYPES[number]

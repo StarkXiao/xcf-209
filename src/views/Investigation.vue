@@ -189,6 +189,10 @@ function goToClues() {
   router.push(`/clues/${caseData.value?.id}`)
 }
 
+function goToGraph() {
+  router.push(`/graph/${caseData.value?.id}`)
+}
+
 function goToDeduction() {
   router.push(`/deduction/${caseData.value?.id}`)
 }
@@ -505,6 +509,10 @@ function getShadowStyle(index: number) {
               <span class="action-icon">🧩</span>
               <span class="action-text">线索拼接</span>
               <span class="action-count">{{ gameStore.gameState.discoveredClues.length }}</span>
+            </button>
+            <button class="action-btn" @click="goToGraph">
+              <span class="action-icon">🕸️</span>
+              <span class="action-text">关系图谱</span>
             </button>
             <button class="action-btn" @click="goToDeduction">
               <span class="action-icon">💡</span>

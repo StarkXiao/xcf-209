@@ -33,6 +33,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '线索拼接' }
   },
   {
+    path: '/graph/:caseId',
+    name: 'ClueGraph',
+    component: () => import('@/views/ClueGraph.vue'),
+    meta: { title: '线索关系图谱' }
+  },
+  {
     path: '/deduction/:caseId',
     name: 'Deduction',
     component: () => import('@/views/Deduction.vue'),
