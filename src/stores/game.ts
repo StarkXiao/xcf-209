@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence } from '@/types'
 import { getCaseById } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
+import { useSaveStore } from './save'
 
 export const useGameStore = defineStore('game', () => {
   const gameState = ref<GameState>({
@@ -53,8 +54,18 @@ export const useGameStore = defineStore('game', () => {
     const caseData = getCaseById(caseId)
     if (!caseData) return false
 
-    const startingToolIds = inheritedTools?.length ? inheritedTools : (caseData.startingTools || defaultStartingTools)
-    const startingTools = startingToolIds
+    const baseToolIds = caseData.startingTools || defaultStartingTools
+    
+    let finalToolIds: string[]
+    if (inheritedTools && inheritedTools.length > 0) {
+      finalToolIds = [...new Set([...baseToolIds, ...inheritedTools])]
+    } else {
+      const saveStore = useSaveStore()
+      const globalTools = saveStore.globalUnlockedTools
+      finalToolIds = [...new Set([...baseToolIds, ...globalTools])]
+    }
+
+    const startingTools = finalToolIds
       .map(id => createToolInstance(id))
       .filter((t): t is Tool => t !== null)
 
@@ -76,8 +87,12 @@ export const useGameStore = defineStore('game', () => {
       deductionBranches: []
     }
 
+    const bonusTools = startingTools.filter(t => !baseToolIds.includes(t.id))
     addLog('discovery', `开始调查案件：${caseData.title}`)
     addLog('tool_use', `携带工具：${startingTools.map(t => t.name).join('、')}`)
+    if (bonusTools.length > 0) {
+      addLog('discovery', `继承工具：${bonusTools.map(t => t.name).join('、')}`)
+    }
     return true
   }
 

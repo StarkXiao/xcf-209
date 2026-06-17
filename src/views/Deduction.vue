@@ -7,6 +7,11 @@ import { getCaseById, unlockNextCase, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
 import type { ConclusionOption } from '@/types'
 
+const branchRewardMap: Record<string, string[]> = {
+  'standard': [],
+  'deep-truth': ['tool-magnifier-pro', 'tool-uv-light-advanced']
+}
+
 const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
@@ -18,6 +23,7 @@ const resultMessage = ref('')
 const isCorrect = ref(false)
 const sanityLost = ref(0)
 const unlockedBranch = ref<string | null>(null)
+const branchRewards = ref<string[]>([])
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -131,6 +137,7 @@ function makeDeduction() {
   isCorrect.value = option.isCorrect
   resultMessage.value = option.feedback
   sanityLost.value = option.sanityCost
+  branchRewards.value = []
   
   if (option.branch) {
     unlockedBranch.value = option.branch
@@ -141,8 +148,6 @@ function makeDeduction() {
     gameStore.modifySanity(-option.sanityCost, '真相推演')
   }
   
-  showResult.value = true
-  
   if (option.isCorrect) {
     gameStore.addLog('conclusion', `案件已结案：${caseData.value.title}`, {
       conclusion: option.text,
@@ -151,12 +156,24 @@ function makeDeduction() {
     })
     
     unlockNextCase(caseData.value.id)
-
-    if (option.branch === 'deep-truth') {
-      saveStore.unlockGlobalTool('tool-magnifier-pro')
-      saveStore.unlockGlobalTool('tool-uv-light-advanced')
-    }
   }
+
+  if (option.branch && branchRewardMap[option.branch]) {
+    const rewards = branchRewardMap[option.branch]
+    rewards.forEach(toolId => {
+      const tool = getToolById(toolId)
+      if (tool) {
+        saveStore.unlockGlobalTool(toolId)
+        branchRewards.value.push(tool.name)
+        gameStore.addLog('discovery', `解锁全局工具：${tool.name}`)
+      }
+    })
+  }
+
+  const saveName = `[结算] ${caseData.value.title} - ${new Date().toLocaleString('zh-CN')}`
+  saveStore.createSave(saveName)
+  
+  showResult.value = true
 }
 
 function closeResult() {
@@ -427,6 +444,16 @@ function getBranchInfo(branch: string): { name: string; description: string } {
             <div v-if="unlockedBranch" class="branch-unlock">
               <span class="branch-icon">🌿</span>
               <span>解锁推演分支：{{ getBranchInfo(unlockedBranch).name }}</span>
+            </div>
+
+            <div v-if="branchRewards.length > 0" class="branch-rewards">
+              <p class="rewards-title">🎁 继承奖励已解锁</p>
+              <p class="rewards-desc">以下工具将在新案件中可用：</p>
+              <div class="rewards-list">
+                <span v-for="name in branchRewards" :key="name" class="reward-tag">
+                  {{ name }}
+                </span>
+              </div>
             </div>
             
             <div v-if="sanityLost > 0" class="result-sanity">
@@ -1031,6 +1058,46 @@ function getBranchInfo(branch: string): { name: string; description: string } {
   margin-bottom: 1rem;
   color: #ffd700;
   font-size: 0.9rem;
+}
+
+.branch-rewards {
+  padding: 0.75rem;
+  background: rgba(58, 139, 90, 0.15);
+  border: 1px solid var(--color-success);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.rewards-title {
+  color: #ffd700;
+  font-weight: bold;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.rewards-desc {
+  color: var(--color-text-dim);
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.rewards-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.reward-tag {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: rgba(107, 76, 154, 0.3);
+  border: 1px solid var(--color-accent);
+  border-radius: 12px;
+  color: var(--color-accent-light);
+  font-size: 0.8rem;
+  font-weight: bold;
 }
 
 .result-sanity {

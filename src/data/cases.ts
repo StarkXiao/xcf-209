@@ -336,9 +336,9 @@ export const cases: Case[] = [
         {
           id: 'conclusion-deep-truth',
           text: '守望者并非被献祭，而是回应了深海的召唤，自愿成为深潜者的一员',
-          isCorrect: false,
+          isCorrect: true,
           sanityCost: 20,
-          feedback: '你触及了更深层的真相...但这真的是正确的答案吗？',
+          feedback: '你发现了隐藏在表面之下的真正真相。守望者并非被迫献祭，而是主动回应了深海的呼唤，完成了向深潜者的蜕变。这是一般调查无法触及的深渊真相...',
           requiredTools: ['tool-uv-light', 'tool-recorder', 'tool-lockpick'],
           requiredEvidence: ['evidence-hidden-mark', 'evidence-whisper', 'evidence-locked-drawer'],
           branch: 'deep-truth'

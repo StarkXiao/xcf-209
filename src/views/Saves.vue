@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/stores/save'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
+import { getToolById } from '@/data/tools'
 
 const router = useRouter()
 const saveStore = useSaveStore()
@@ -13,6 +14,11 @@ const saves = computed(() => saveStore.saves)
 
 const sortedSaves = computed(() => {
   return [...saves.value].sort((a, b) => b.updatedAt - a.updatedAt)
+})
+
+const globalToolNames = computed(() => {
+  return saveStore.globalUnlockedTools
+    .map(id => getToolById(id)?.name || id)
 })
 
 function loadSaveData(saveId: string) {
@@ -50,6 +56,12 @@ function getSanityStatus(sanity: number): string {
   if (sanity > 40) return '焦虑不安'
   if (sanity > 20) return '精神恍惚'
   return '濒临崩溃'
+}
+
+function getInheritedToolNames(save: typeof saves.value[0]): string[] {
+  return save.gameState.tools
+    .filter(t => t.tier >= 2 || save.gameState.deductionBranches.length > 0)
+    .map(t => t.name)
 }
 
 function createNewSave() {
@@ -147,6 +159,21 @@ function goToCases() {
             </div>
 
             <div class="stat-row">
+              <span class="stat-label">工具</span>
+              <span class="stat-value">{{ save.gameState.tools.length }}</span>
+            </div>
+
+            <div v-if="save.gameState.deductionBranches.length > 0" class="stat-row branch-row">
+              <span class="stat-label">分支</span>
+              <span class="stat-value branch-value">{{ save.gameState.deductionBranches.join('、') }}</span>
+            </div>
+
+            <div v-if="getInheritedToolNames(save).length > 0" class="stat-row inherit-row">
+              <span class="stat-label">可继承</span>
+              <span class="stat-value inherit-value">{{ getInheritedToolNames(save).join('、') }}</span>
+            </div>
+
+            <div class="stat-row">
               <span class="stat-label">时长</span>
               <span class="stat-value">{{ saveStore.getPlayDuration(save.gameState.startTime) }}</span>
             </div>
@@ -179,7 +206,7 @@ function goToCases() {
       <h3 class="info-title">存档说明</h3>
       <ul class="info-list">
         <li>
-          <strong>自动保存：</strong>游戏会在关键节点自动保存进度
+          <strong>自动保存：</strong>案件结算时会自动创建存档
         </li>
         <li>
           <strong>手动保存：</strong>在调查过程中可以随时手动创建存档
@@ -189,6 +216,9 @@ function goToCases() {
         </li>
         <li>
           <strong>本地存储：</strong>存档保存在浏览器本地，清除浏览器数据会丢失存档
+        </li>
+        <li v-if="globalToolNames.length > 0">
+          <strong>继承工具：</strong>{{ globalToolNames.join('、') }} — 这些工具会在 New Game+ 中自动携带
         </li>
       </ul>
     </div>
@@ -330,6 +360,23 @@ function goToCases() {
   font-size: 0.95rem;
   color: var(--color-text);
   font-weight: bold;
+}
+
+.branch-row {
+  background: rgba(255, 215, 0, 0.08);
+}
+
+.branch-value {
+  color: #ffd700;
+}
+
+.inherit-row {
+  background: rgba(107, 76, 154, 0.1);
+}
+
+.inherit-value {
+  color: var(--color-accent-light);
+  font-size: 0.8rem;
 }
 
 .sanity-display {

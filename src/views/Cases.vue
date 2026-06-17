@@ -3,9 +3,12 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { cases } from '@/data/cases'
 import { useGameStore } from '@/stores/game'
+import { useSaveStore } from '@/stores/save'
+import { getToolById } from '@/data/tools'
 
 const router = useRouter()
 const gameStore = useGameStore()
+const saveStore = useSaveStore()
 
 const difficultyColors = {
   easy: '#3a8b5a',
@@ -33,6 +36,11 @@ const sortedCases = computed(() => {
   })
 })
 
+const globalToolNames = computed(() => {
+  return saveStore.globalUnlockedTools
+    .map(id => getToolById(id)?.name || id)
+})
+
 function selectCase(caseItem: typeof cases[0]) {
   if (caseItem.status === 'locked') return
   
@@ -46,6 +54,26 @@ function selectCase(caseItem: typeof cases[0]) {
     gameStore.startCase(caseItem.id)
     router.push(`/investigation/${caseItem.id}`)
   }
+}
+
+function startNewGamePlus(caseItem: typeof cases[0]) {
+  if (gameStore.currentCase) {
+    if (!confirm('当前有未完成的案件，确定要切换吗？')) {
+      return
+    }
+  }
+  
+  const inherited = saveStore.globalUnlockedTools
+  if (inherited.length === 0) {
+    gameStore.startCase(caseItem.id)
+  } else {
+    gameStore.startCase(caseItem.id, inherited)
+  }
+  
+  gameStore.modifySanity(20, 'New Game+ 奖励')
+  gameStore.addLog('discovery', 'New Game+：继承了全局解锁工具')
+  
+  router.push(`/investigation/${caseItem.id}`)
 }
 
 function getCaseProgress(caseItem: typeof cases[0]): number {
@@ -129,9 +157,13 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
         </div>
         
         <div v-if="caseItem.status === 'completed'" class="case-actions">
-          <button class="completed-btn" disabled>
-            ✓ 已结案
+          <button class="ngplus-btn" @click.stop="startNewGamePlus(caseItem)">
+            🔄 重新调查 (New Game+)
           </button>
+          <div v-if="globalToolNames.length > 0" class="inherit-info">
+            <span class="inherit-label">继承工具:</span>
+            <span class="inherit-tools">{{ globalToolNames.join('、') }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -143,6 +175,8 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
         <li>某些证据会降低理智值，但可能包含关键信息</li>
         <li>线索之间可能存在关联，尝试将它们连接起来</li>
         <li>完成案件后可以解锁新的案件</li>
+        <li>使用特殊工具发现隐藏证据，可以解锁深层推演分支</li>
+        <li>解锁深层真相后，可获得继承工具奖励，在 New Game+ 中使用</li>
       </ul>
     </div>
   </div>
@@ -332,6 +366,45 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
   font-size: 1rem;
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.ngplus-btn {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1rem;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.ngplus-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+}
+
+.inherit-info {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(107, 76, 154, 0.1);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inherit-label {
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.inherit-tools {
+  color: var(--color-accent-light);
+  font-weight: bold;
 }
 
 .investigator-tips {
