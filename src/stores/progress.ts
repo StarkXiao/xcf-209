@@ -36,22 +36,25 @@ export const useProgressStore = defineStore('progress', () => {
   function syncCaseStatuses() {
     cases.forEach(c => {
       const progress = progressMap.value[c.id]
+
       if (progress?.completed) {
         c.status = 'completed'
-      } else if (c.status === 'failed' || c.status === 'abandoned' || c.status === 'reopened') {
-        // preserve these statuses from progress
-      } else if (c.prerequisites.length === 0) {
-        if (c.status !== 'in_progress') {
-          c.status = 'available'
-        }
+        return
+      }
+
+      if (progress?.lastStatus && (progress.lastStatus === 'failed' || progress.lastStatus === 'abandoned' || progress.lastStatus === 'reopened')) {
+        c.status = progress.lastStatus
+        return
+      }
+
+      if (c.prerequisites.length === 0) {
+        c.status = 'available'
       } else {
         const allPrereqsCompleted = c.prerequisites.every(
           prereqId => progressMap.value[prereqId]?.completed
         )
         if (allPrereqsCompleted) {
-          if (c.status !== 'in_progress') {
-            c.status = 'available'
-          }
+          c.status = 'available'
         } else {
           c.status = 'locked'
         }
@@ -155,6 +158,7 @@ export const useProgressStore = defineStore('progress', () => {
     progress.completedAt = Date.now()
     progress.playCount += 1
     progress.totalSanityLost += sanityLost
+    progress.lastStatus = 'completed'
 
     if (branchId && !progress.unlockedBranches.includes(branchId)) {
       progress.unlockedBranches.push(branchId)
@@ -266,7 +270,7 @@ export const useProgressStore = defineStore('progress', () => {
     if (caseData.status !== 'failed' && caseData.status !== 'abandoned' && caseData.status !== 'completed') return false
 
     const progress = initProgress(caseId)
-    progress.lastStatus = caseData.status
+    progress.lastStatus = 'reopened'
     reopenCaseData(caseId)
     saveProgressToStorage()
     return true

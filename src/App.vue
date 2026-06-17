@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/game'
+import { useProgressStore } from '@/stores/progress'
 
 const router = useRouter()
 const gameStore = useGameStore()
+void useProgressStore()
 
 const sanityColor = computed(() => {
   const percentage = gameStore.sanityPercentage

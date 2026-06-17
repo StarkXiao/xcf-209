@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { cases, resetCaseForReplay } from '@/data/cases'
+import { cases } from '@/data/cases'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
 import { useProgressStore } from '@/stores/progress'
@@ -131,7 +131,7 @@ function startNewGamePlus(caseItem: typeof cases[0]) {
     }
   }
 
-  resetCaseForReplay(caseItem.id)
+  progressStore.reopenCaseProgress(caseItem.id)
 
   const success = newGamePlusStore.startNewGamePlus(caseItem.id)
   if (success) {
