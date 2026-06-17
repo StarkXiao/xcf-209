@@ -117,16 +117,32 @@ onMounted(() => {
     gameStore.startCase(caseData.value!.id)
   }
   
-  if (caseData.value.scenes.length > 0) {
-    selectScene(caseData.value.scenes[0])
+  const firstUnlocked = caseData.value.scenes.find(s => gameStore.isSceneUnlocked(s.id))
+  if (firstUnlocked) {
+    selectScene(firstUnlocked)
   }
 })
 
 function selectScene(scene: Scene) {
+  if (!gameStore.isSceneUnlocked(scene.id)) {
+    searchResultMessage.value = `场景「${scene.name}」尚未解锁，需推进调查阶段`
+    showSearchResult.value = true
+    setTimeout(() => { showSearchResult.value = false }, 2000)
+    return
+  }
   currentScene.value = scene
   gameStore.visitScene(scene.id)
   selectedEvidence.value = null
   showEvidenceDetail.value = false
+}
+
+function getSceneLockReason(scene: Scene): string {
+  const phaseId = gameStore.getSceneUnlockingPhase(scene.id)
+  if (!phaseId) return ''
+  const phase = gameStore.allPhases.find(p => p.id === phaseId)
+  if (!phase) return ''
+  if (phase.isActive || phase.isCompleted) return ''
+  return `需要解锁阶段：${phase.name}`
 }
 
 function getEvidencePosition(evidence: Evidence) {
@@ -377,11 +393,20 @@ function getShadowStyle(index: number) {
               v-for="scene in caseData.scenes"
               :key="scene.id"
               class="scene-item"
-              :class="{ active: currentScene?.id === scene.id }"
+              :class="{ 
+                active: currentScene?.id === scene.id,
+                locked: !gameStore.isSceneUnlocked(scene.id)
+              }"
               @click="selectScene(scene)"
             >
-              <div class="scene-name">{{ scene.name }}</div>
-              <div class="scene-progress">
+              <div class="scene-name">
+                <span v-if="!gameStore.isSceneUnlocked(scene.id)" class="lock-icon">🔒</span>
+                {{ scene.name }}
+              </div>
+              <div v-if="!gameStore.isSceneUnlocked(scene.id)" class="scene-lock-reason">
+                {{ getSceneLockReason(scene) }}
+              </div>
+              <div v-else class="scene-progress">
                 <div class="mini-progress">
                   <div 
                     class="mini-progress-fill"
@@ -864,6 +889,29 @@ function getShadowStyle(index: number) {
 .scene-item.active {
   border-color: var(--color-accent);
   background: rgba(107, 76, 154, 0.2);
+}
+
+.scene-item.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.scene-item.locked:hover {
+  border-color: var(--color-border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.lock-icon {
+  margin-right: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.scene-lock-reason {
+  font-size: 0.75rem;
+  color: var(--color-warning);
+  margin-top: 0.25rem;
+  font-style: italic;
 }
 
 .scene-name {

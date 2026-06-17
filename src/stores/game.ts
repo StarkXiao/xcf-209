@@ -226,14 +226,12 @@ export const useGameStore = defineStore('game', () => {
       activeAnalyses: [],
       unlockedRecipes: [],
       craftingHistory: [],
-      intelligenceState: {
-        ...createInitialIntelligenceState(),
-        currentPhaseId: 'phase-1'
-      },
+      intelligenceState: createInitialIntelligenceState(),
       mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents))
     }
 
     startTimer()
+    startPhase('phase-1')
 
     if (charId) {
       characterStore.incrementPlayCount(charId)
@@ -1227,6 +1225,13 @@ export const useGameStore = defineStore('game', () => {
     if (branchId === 'deep-truth') {
       bonusScore += 15
     }
+
+    const intelligenceCompleteness = gameState.value.intelligenceState.deductionInfoCompleteness
+    if (intelligenceCompleteness >= 75) {
+      bonusScore += 10
+    } else if (intelligenceCompleteness >= 50) {
+      bonusScore += 5
+    }
     
     bonusScore = Math.round(bonusScore * DEFAULT_SCORE_CONFIG.bonusMultiplier)
 
@@ -1872,7 +1877,26 @@ export const useGameStore = defineStore('game', () => {
     if (!currentCase.value) return false
     
     const progress = gameState.value.intelligenceState.sceneUnlockProgress[sceneId]
-    return progress !== undefined && progress >= 100
+    if (progress !== undefined && progress >= 100) return true
+
+    for (const phase of allPhases.value) {
+      if (phase.isCompleted || phase.isActive) {
+        if (phase.unlockedScenes.includes(sceneId)) {
+          return true
+        }
+      }
+    }
+
+    return false
+  }
+
+  function getSceneUnlockingPhase(sceneId: string): string | null {
+    for (const phase of allPhases.value) {
+      if (phase.unlockedScenes.includes(sceneId)) {
+        return phase.id
+      }
+    }
+    return null
   }
 
   function getUnlockedScenes() {
@@ -2017,6 +2041,7 @@ export const useGameStore = defineStore('game', () => {
     checkMailDelivery,
     clearMailNotification,
     isSceneUnlocked,
+    getSceneUnlockingPhase,
     getUnlockedScenes,
     resetGame
   }

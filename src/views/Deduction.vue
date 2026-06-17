@@ -32,6 +32,28 @@ const caseData = computed(() => {
   return getCaseById(caseId)
 })
 
+const intelligenceCompleteness = computed(() => {
+  return gameStore.deductionInfoCompleteness
+})
+
+const completenessLevel = computed(() => {
+  const c = intelligenceCompleteness.value
+  if (c >= 75) return 'full'
+  if (c >= 50) return 'good'
+  if (c >= 25) return 'partial'
+  return 'poor'
+})
+
+const completenessLabel = computed(() => {
+  const labels: Record<string, string> = {
+    full: '情报充分',
+    good: '情报较全',
+    partial: '情报不足',
+    poor: '情报匮乏'
+  }
+  return labels[completenessLevel.value]
+})
+
 const allConclusionOptions = computed(() => {
   if (!caseData.value) return []
   
@@ -50,6 +72,20 @@ const allConclusionOptions = computed(() => {
   }))
   
   return [...realOptions, ...fakeOptions]
+})
+
+const visibleConclusionOptions = computed(() => {
+  const completeness = intelligenceCompleteness.value
+  return allConclusionOptions.value.filter(option => {
+    if ((option as any).isFake) return true
+
+    const index = caseData.value?.conclusion.options.findIndex(o => o.id === option.id) ?? -1
+    
+    if (completeness < 25 && index > 1) return false
+    if (completeness < 50 && index > 2) return false
+    
+    return true
+  })
 })
 
 const isFakeOption = (optionId: string) => {
@@ -71,6 +107,7 @@ const canDeduce = computed(() => {
   if (!hasEnoughEvidence.value) return false
   if (gameStore.gameState.sanity < caseData.value.conclusion.sanityThreshold) return false
   if (!isOptionAvailable(option)) return false
+  if (intelligenceCompleteness.value < 15) return false
   
   return true
 })
@@ -87,17 +124,89 @@ const missingEvidence = computed(() => {
   if (!caseData.value) return []
   const requiredEvidence = caseData.value.conclusion.evidence
   const discovered = gameStore.gameState.discoveredEvidence
+  const completeness = intelligenceCompleteness.value
   return requiredEvidence
     .filter(e => !discovered.includes(e))
     .map(evId => {
       const ev = getEvidenceById(caseData.value!.id, evId)
-      return ev?.name || evId
+      if (ev) return ev.name
+      if (completeness >= 50) return `${evId}（未知证据）`
+      if (completeness >= 25) return `???（情报不足，无法识别）`
+      return '■■■■■'
     })
 })
 
+function getOptionVisibility(option: ConclusionOption): { obscured: boolean; obscuredText: string } {
+  const completeness = intelligenceCompleteness.value
+  const text = option.text
+  
+  if (completeness >= 75) return { obscured: false, obscuredText: text }
+  
+  if (completeness >= 50) {
+    const chars = text.split('')
+    const revealCount = Math.ceil(chars.length * 0.7)
+    const obscuredText = chars.map((c, i) => {
+      if (i < revealCount || c === '，' || c === '。' || c === '、' || c === ' ') return c
+      return '■'
+    }).join('')
+    return { obscured: true, obscuredText }
+  }
+  
+  if (completeness >= 25) {
+    const chars = text.split('')
+    const revealCount = Math.ceil(chars.length * 0.4)
+    const obscuredText = chars.map((c, i) => {
+      if (i < revealCount || c === '，' || c === '。' || c === '、' || c === ' ') return c
+      return '■'
+    }).join('')
+    return { obscured: true, obscuredText }
+  }
+  
+  const chars = text.split('')
+  const revealCount = Math.ceil(chars.length * 0.15)
+  const obscuredText = chars.map((c, i) => {
+    if (i < revealCount || c === '，' || c === '。' || c === '、' || c === ' ') return c
+    return '■'
+  }).join('')
+  return { obscured: true, obscuredText }
+}
 
+function getFeedbackForOption(option: ConclusionOption): string {
+  const completeness = intelligenceCompleteness.value
+  const baseFeedback = option.feedback
+  
+  if (completeness >= 75) return baseFeedback
+  
+  if (option.isCorrect) {
+    if (completeness >= 50) return baseFeedback.slice(0, Math.ceil(baseFeedback.length * 0.7)) + '...'
+    if (completeness >= 25) return '部分真相已浮现，但更多信息仍被迷雾遮蔽...'
+    return '你隐约感到这可能是正确的方向，但情报不足以确信...'
+  }
+  
+  if (completeness >= 50) return baseFeedback.slice(0, Math.ceil(baseFeedback.length * 0.5)) + '...'
+  if (completeness >= 25) return '你无法确认这个判断是否正确，缺少关键情报...'
+  return '情报严重不足，无法做出可靠判断...'
+}
+
+function getOptionIntelligenceHint(option: ConclusionOption): string | null {
+  const index = caseData.value?.conclusion.options.findIndex(o => o.id === option.id) ?? -1
+  const completeness = intelligenceCompleteness.value
+  
+  if (completeness < 25 && index > 1) return '情报不足，无法识别此结论'
+  if (completeness < 50 && index > 2) return '情报不足，无法识别此结论'
+  if (completeness < 15) return '情报极度匮乏，无法进行推演'
+  
+  return null
+}
 
 function isOptionAvailable(option: ConclusionOption): boolean {
+  const completeness = intelligenceCompleteness.value
+  const index = caseData.value?.conclusion.options.findIndex(o => o.id === option.id) ?? -1
+  
+  if (completeness < 25 && index > 1) return false
+  if (completeness < 50 && index > 2) return false
+  if (completeness < 15) return false
+
   if (option.requiredTools && option.requiredTools.length > 0) {
     const hasAllTools = option.requiredTools.every(toolId => 
       gameStore.gameState.tools.some(t => t.id === toolId && t.uses > 0 && t.durability > 0)
@@ -164,7 +273,7 @@ function makeDeduction() {
   usedTime.value = gameStore.getUsedTime()
   
   isCorrect.value = option.isCorrect
-  resultMessage.value = option.feedback
+  resultMessage.value = getFeedbackForOption(option)
   sanityLost.value = option.sanityCost
   branchRewards.value = []
   caseRewards.value = null
@@ -189,7 +298,8 @@ function makeDeduction() {
       sanityLost: option.sanityCost,
       branch: option.branch,
       score: caseScore.value.totalScore,
-      grade: caseScore.value.grade
+      grade: caseScore.value.grade,
+      intelligenceCompleteness: intelligenceCompleteness.value
     })
 
     const prevCompleted = progressStore.getProgress(caseData.value.id)?.completed
@@ -314,6 +424,27 @@ function disproveOption(optionId: string) {
       <div class="deduction-content">
         <div class="evidence-check card">
           <h3 class="check-title">证据收集状态</h3>
+
+          <div class="intelligence-section">
+            <h4>情报完整度</h4>
+            <div class="intelligence-header">
+              <span class="intelligence-label" :class="completenessLevel">{{ completenessLabel }}</span>
+              <span class="intelligence-value">{{ intelligenceCompleteness }}%</span>
+            </div>
+            <div class="intelligence-bar">
+              <div 
+                class="intelligence-fill" 
+                :class="completenessLevel"
+                :style="{ width: `${intelligenceCompleteness}%` }"
+              ></div>
+            </div>
+            <div class="intelligence-hint">
+              <span v-if="completenessLevel === 'poor'">⚠️ 情报极度匮乏，推演结论将受到严重限制</span>
+              <span v-else-if="completenessLevel === 'partial'">⚠️ 情报不足，部分推演结论被遮蔽</span>
+              <span v-else-if="completenessLevel === 'good'">部分推演信息尚未完全揭示</span>
+              <span v-else>✓ 情报充分，可进行全面推演</span>
+            </div>
+          </div>
           
           <div class="progress-section">
             <div class="progress-header">
@@ -392,30 +523,40 @@ function disproveOption(optionId: string) {
             根据你收集的所有证据和线索，选择你认为最接近真相的结论。
             <br/>
             <span class="warning">警告：错误的结论可能会进一步侵蚀你的理智。</span>
+            <br v-if="intelligenceCompleteness < 50" />
+            <span v-if="intelligenceCompleteness < 50" class="intelligence-warning-text">
+              🔒 情报不足时，部分结论被遮蔽且反馈受限
+            </span>
           </p>
 
           <div class="options-list">
             <div
-              v-for="(option, index) in allConclusionOptions"
+              v-for="(option, index) in visibleConclusionOptions"
               :key="option.id"
               class="option-item"
               :class="{ 
                 selected: selectedConclusion === option.id,
                 disabled: !isOptionAvailable(option),
                 'branch-option': option.branch,
-                'fake-option': isFakeOption(option.id)
+                'fake-option': isFakeOption(option.id),
+                'obscured-option': getOptionVisibility(option).obscured
               }"
               @click="selectOption(option)"
             >
               <div class="option-header">
                 <span class="option-number">{{ index + 1 }}</span>
                 <div class="option-text-wrapper">
-                  <span class="option-text">{{ option.text }}</span>
+                  <span class="option-text" :class="{ 'text-obscured': getOptionVisibility(option).obscured }">
+                    {{ getOptionVisibility(option).obscuredText }}
+                  </span>
                   <span v-if="option.branch" class="branch-tag">
                     {{ getBranchInfo(option.branch).name }}
                   </span>
                   <span v-if="isFakeOption(option.id)" class="fake-option-tag">
                     👻 幻觉
+                  </span>
+                  <span v-if="getOptionVisibility(option).obscured" class="obscured-tag">
+                    🔒 遮蔽
                   </span>
                 </div>
               </div>
@@ -431,6 +572,9 @@ function disproveOption(optionId: string) {
                 <ul v-if="getMissingRequirements(option).evidence.length > 0">
                   <li>特殊证据: {{ getMissingRequirements(option).evidence.join('、') }}</li>
                 </ul>
+                <p v-if="getOptionIntelligenceHint(option)" class="intelligence-lock-hint">
+                  {{ getOptionIntelligenceHint(option) }}
+                </p>
               </div>
               
               <div v-if="isFakeOption(option.id)" class="fake-option-hint">
@@ -442,6 +586,10 @@ function disproveOption(optionId: string) {
             </div>
           </div>
 
+          <div v-if="intelligenceCompleteness < 25" class="hidden-options-hint">
+            <p>📝 还有 {{ allConclusionOptions.length - visibleConclusionOptions.length }} 个结论因情报不足而被隐藏</p>
+          </div>
+
           <div class="deduction-actions">
             <button 
               class="deduce-btn primary"
@@ -451,7 +599,8 @@ function disproveOption(optionId: string) {
               🔍 提交推演
             </button>
             <p v-if="!canDeduce" class="cannot-deduce">
-              {{ !hasEnoughEvidence ? '证据不足，无法推演' : 
+              {{ intelligenceCompleteness < 15 ? '情报极度匮乏，无法进行推演！请阅读更多邮件和文书。' :
+                 !hasEnoughEvidence ? '证据不足，无法推演' : 
                  selectedConclusion ? '条件不足，无法选择此结论' : 
                  '请选择一个推演结论' }}
             </p>
@@ -485,6 +634,10 @@ function disproveOption(optionId: string) {
             <div class="stat-item">
               <span class="stat-label">当前理智</span>
               <span class="stat-value sanity">{{ gameStore.gameState.sanity }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">情报完整度</span>
+              <span class="stat-value" :class="completenessLevel">{{ intelligenceCompleteness }}%</span>
             </div>
             <div class="stat-item">
               <span class="stat-label">调查时长</span>
@@ -691,6 +844,78 @@ function disproveOption(optionId: string) {
 .evidence-check {
   display: flex;
   flex-direction: column;
+}
+
+.intelligence-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(107, 76, 154, 0.1);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+}
+
+.intelligence-section h4 {
+  color: var(--color-accent-light);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.intelligence-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.intelligence-label {
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.intelligence-label.poor { color: var(--color-danger); }
+.intelligence-label.partial { color: #ff9800; }
+.intelligence-label.good { color: #2196f3; }
+.intelligence-label.full { color: var(--color-success); }
+
+.intelligence-value {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--color-accent-light);
+}
+
+.intelligence-bar {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  margin-bottom: 0.5rem;
+}
+
+.intelligence-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.intelligence-fill.poor { background: linear-gradient(90deg, var(--color-danger), #ff5722); }
+.intelligence-fill.partial { background: linear-gradient(90deg, #ff9800, #ffc107); }
+.intelligence-fill.good { background: linear-gradient(90deg, #2196f3, #03a9f4); }
+.intelligence-fill.full { background: linear-gradient(90deg, var(--color-success), #66bb6a); }
+
+.intelligence-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  line-height: 1.4;
+}
+
+.intelligence-hint span {
+  display: block;
+}
+
+.intelligence-warning-text {
+  color: #ff9800;
+  font-size: 0.85rem;
+  font-style: italic;
 }
 
 .check-title {
@@ -978,6 +1203,48 @@ function disproveOption(optionId: string) {
   cursor: not-allowed;
 }
 
+.option-item.obscured-option {
+  border-left: 3px solid #ff9800;
+  background: rgba(255, 152, 0, 0.05);
+}
+
+.text-obscured {
+  letter-spacing: 1px;
+}
+
+.obscured-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: rgba(255, 152, 0, 0.2);
+  color: #ff9800;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  width: fit-content;
+  margin-top: 0.25rem;
+}
+
+.intelligence-lock-hint {
+  font-size: 0.8rem;
+  color: #ff9800;
+  font-style: italic;
+  margin-top: 0.5rem;
+}
+
+.hidden-options-hint {
+  text-align: center;
+  padding: 0.75rem;
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px dashed #ff9800;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.hidden-options-hint p {
+  color: #ff9800;
+  font-size: 0.85rem;
+}
+
 .fake-option-tag {
   display: inline-block;
   padding: 0.15rem 0.5rem;
@@ -1155,6 +1422,11 @@ function disproveOption(optionId: string) {
 .stat-value.sanity {
   color: var(--color-accent-light);
 }
+
+.stat-value.poor { color: var(--color-danger); font-weight: bold; }
+.stat-value.partial { color: #ff9800; font-weight: bold; }
+.stat-value.good { color: #2196f3; font-weight: bold; }
+.stat-value.full { color: var(--color-success); font-weight: bold; }
 
 .game-log {
   flex: 1;
