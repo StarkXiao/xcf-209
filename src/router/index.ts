@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Saves',
     component: () => import('@/views/Saves.vue'),
     meta: { title: '存档回放' }
+  },
+  {
+    path: '/workshop',
+    name: 'Workshop',
+    component: () => import('@/views/Workshop.vue'),
+    meta: { title: '案件工坊' }
   }
 ]
 

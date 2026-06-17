@@ -38,6 +38,11 @@ const features = [
     icon: '🌟',
     title: '天赋系统',
     description: '不同天赋带来独特优势，选择最适合你调查风格的能力组合。'
+  },
+  {
+    icon: '🏭',
+    title: '案件工坊',
+    description: '创建属于你自己的案件，配置证据、线索和多结局，体验创作的乐趣。'
   }
 ]
 
@@ -51,6 +56,10 @@ function goToCharacter() {
 
 function goToSaves() {
   router.push('/saves')
+}
+
+function goToWorkshop() {
+  router.push('/workshop')
 }
 </script>
 
@@ -92,6 +101,9 @@ function goToSaves() {
           </button>
           <button class="secondary-button" @click="goToSaves">
             存档回放
+          </button>
+          <button class="secondary-button" @click="goToWorkshop">
+            案件工坊
           </button>
         </div>
       </div>
