@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useCharacterStore } from '@/stores/character'
 
 const router = useRouter()
+const characterStore = useCharacterStore()
+
+const activeProfile = computed(() => characterStore.activeProfile)
 
 const features = [
   {
@@ -23,11 +28,29 @@ const features = [
     icon: '💡',
     title: '真相推演',
     description: '根据收集的证据做出最终判断，但记住——真相往往比谎言更可怕。'
+  },
+  {
+    icon: '👤',
+    title: '角色档案',
+    description: '创建专属调查员，解锁独特天赋，影响理智消耗、线索分析和事件触发。'
+  },
+  {
+    icon: '🌟',
+    title: '天赋系统',
+    description: '不同天赋带来独特优势，选择最适合你调查风格的能力组合。'
   }
 ]
 
 function startGame() {
   router.push('/cases')
+}
+
+function goToCharacter() {
+  router.push('/character')
+}
+
+function goToSaves() {
+  router.push('/saves')
 }
 </script>
 
@@ -44,9 +67,33 @@ function startGame() {
           作为一名调查员，你将面对超越人类认知的恐怖存在。<br/>
           每一个案件都是一场与理智的博弈，每一次发现都可能让你更接近疯狂...
         </p>
-        <button class="start-button primary" @click="startGame">
-          开始调查
-        </button>
+        
+        <div v-if="activeProfile" class="current-character card">
+          <div class="char-display">
+            <span class="char-avatar">{{ activeProfile.avatar }}</span>
+            <div class="char-info">
+              <span class="char-name">{{ activeProfile.name }}</span>
+              <span class="char-title">{{ activeProfile.title }}</span>
+            </div>
+          </div>
+          <div class="char-talents">
+            <span v-for="talentId in activeProfile.talents.slice(0, 3)" :key="talentId" class="talent-badge">
+              {{ talentId }}
+            </span>
+          </div>
+        </div>
+
+        <div class="hero-buttons">
+          <button class="start-button primary" @click="startGame">
+            开始调查
+          </button>
+          <button class="secondary-button" @click="goToCharacter">
+            角色档案
+          </button>
+          <button class="secondary-button" @click="goToSaves">
+            存档回放
+          </button>
+        </div>
       </div>
       <div class="hero-decoration">
         <div class="tentacle t1"></div>
@@ -142,11 +189,91 @@ function startGame() {
   line-height: 1.8;
 }
 
+.current-character {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  margin-bottom: 2rem;
+  background: rgba(107, 76, 154, 0.2);
+  border-color: var(--color-accent);
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.char-display {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.char-avatar {
+  font-size: 2.5rem;
+}
+
+.char-info {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.char-name {
+  font-weight: bold;
+  color: var(--color-text);
+  font-size: 1.1rem;
+}
+
+.char-title {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.char-talents {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.talent-badge {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(107, 76, 154, 0.3);
+  border-radius: 10px;
+  color: var(--color-accent-light);
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
 .start-button {
   font-size: 1.2rem;
   padding: 1rem 3rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.secondary-button {
+  font-size: 1rem;
+  padding: 1rem 2rem;
+  background: transparent;
+  border: 2px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.secondary-button:hover {
+  border-color: var(--color-accent);
+  background: rgba(107, 76, 154, 0.2);
 }
 
 .hero-decoration {

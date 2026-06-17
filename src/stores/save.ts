@@ -71,7 +71,8 @@ export const useSaveStore = defineStore('save', () => {
       caseId: currentGameState.currentCase,
       gameState: currentGameState,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      characterProfileId: currentGameState.characterProfileId ?? undefined
     }
 
     saves.value.push(save)

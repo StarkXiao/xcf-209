@@ -3,12 +3,15 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/stores/save'
 import { useGameStore } from '@/stores/game'
+import { useCharacterStore } from '@/stores/character'
 import { getCaseById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
+import { getTalentById } from '@/data/talents'
 
 const router = useRouter()
 const saveStore = useSaveStore()
 const gameStore = useGameStore()
+const characterStore = useCharacterStore()
 
 const saves = computed(() => saveStore.saves)
 
@@ -85,6 +88,29 @@ function createNewSave() {
 function goToCases() {
   router.push('/cases')
 }
+
+function getCharacterName(characterId: string | undefined): string {
+  if (!characterId) return '未选择'
+  const character = characterStore.getCharacterById(characterId)
+  return character ? `${character.name} - ${character.title}` : '未知角色'
+}
+
+function getCharacterAvatar(characterId: string | undefined): string {
+  if (!characterId) return '👤'
+  const character = characterStore.getCharacterById(characterId)
+  return character?.avatar || '👤'
+}
+
+function getCharacterTalents(characterId: string | undefined): string[] {
+  if (!characterId) return []
+  const character = characterStore.getCharacterById(characterId)
+  if (!character) return []
+  return character.talents.slice(0, 3).map(tid => getTalentById(tid)?.name || tid)
+}
+
+function goToCharacter() {
+  router.push('/character')
+}
 </script>
 
 <template>
@@ -97,6 +123,9 @@ function goToCases() {
       <div class="header-actions">
         <button class="action-btn" @click="createNewSave">
           <span>💾</span> 创建存档
+        </button>
+        <button class="action-btn" @click="goToCharacter">
+          <span>👤</span> 角色档案
         </button>
         <button class="action-btn" @click="goToCases">
           <span>📋</span> 案件列表
@@ -119,9 +148,15 @@ function goToCases() {
           class="save-card card"
         >
           <div class="save-header">
-            <h3 class="save-name">{{ save.name }}</h3>
-            <div class="save-meta">
-              <span class="save-case">{{ getCaseName(save.caseId) }}</span>
+            <div class="save-header-main">
+              <h3 class="save-name">{{ save.name }}</h3>
+              <div class="save-meta">
+                <span class="save-case">{{ getCaseName(save.caseId) }}</span>
+              </div>
+            </div>
+            <div class="save-character">
+              <span class="save-char-avatar">{{ getCharacterAvatar(save.characterProfileId) }}</span>
+              <span class="save-char-name">{{ getCharacterName(save.characterProfileId) }}</span>
             </div>
           </div>
 
@@ -161,6 +196,11 @@ function goToCases() {
             <div class="stat-row">
               <span class="stat-label">工具</span>
               <span class="stat-value">{{ save.gameState.tools.length }}</span>
+            </div>
+
+            <div v-if="getCharacterTalents(save.characterProfileId).length > 0" class="stat-row character-row">
+              <span class="stat-label">天赋</span>
+              <span class="stat-value character-value">{{ getCharacterTalents(save.characterProfileId).join('、') }}</span>
             </div>
 
             <div v-if="save.gameState.deductionBranches.length > 0" class="stat-row branch-row">
@@ -313,6 +353,38 @@ function goToCases() {
   margin-bottom: 1rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.save-header-main {
+  flex: 1;
+  min-width: 200px;
+}
+
+.save-character {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(107, 76, 154, 0.15);
+  border-radius: 6px;
+  border: 1px solid rgba(107, 76, 154, 0.3);
+}
+
+.save-char-avatar {
+  font-size: 1.5rem;
+}
+
+.save-char-name {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .save-name {
@@ -377,6 +449,15 @@ function goToCases() {
 .inherit-value {
   color: var(--color-accent-light);
   font-size: 0.8rem;
+}
+
+.character-row {
+  background: rgba(107, 76, 154, 0.15);
+}
+
+.character-value {
+  color: var(--color-accent-light);
+  font-size: 0.85rem;
 }
 
 .sanity-display {

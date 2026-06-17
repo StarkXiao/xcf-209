@@ -209,3 +209,113 @@ export interface DeductionBranch {
   requiredEvidence: string[]
   unlocksOptions: string[]
 }
+
+export interface CharacterStats {
+  courage: number
+  wisdom: number
+  perception: number
+  willpower: number
+  luck: number
+}
+
+export type TalentEffectType = 
+  | 'sanity_cost_reduction'
+  | 'sanity_recovery_bonus'
+  | 'clue_analysis_speed'
+  | 'clue_discovery_bonus'
+  | 'evidence_hit_rate'
+  | 'event_trigger_chance'
+  | 'special_event_unlock'
+  | 'tool_durability_bonus'
+  | 'max_sanity_bonus'
+  | 'starting_tools'
+  | 'luck_bonus'
+
+export interface TalentEffect {
+  type: TalentEffectType
+  value: number
+  description: string
+}
+
+export interface Talent {
+  id: string
+  name: string
+  description: string
+  icon: string
+  rarity: 'common' | 'rare' | 'legendary'
+  effects: TalentEffect[]
+  prerequisites?: string[]
+  requiredStats?: Partial<CharacterStats>
+  unlocked: boolean
+}
+
+export interface CharacterProfile {
+  id: string
+  name: string
+  title: string
+  avatar: string
+  background: string
+  stats: CharacterStats
+  talents: string[]
+  createdAt: number
+  updatedAt: number
+  playCount: number
+  completedCases: string[]
+  totalSanityLost: number
+  totalEvidenceDiscovered: number
+  isActive: boolean
+}
+
+export interface SceneEvent {
+  id: string
+  name: string
+  description: string
+  type: 'positive' | 'negative' | 'neutral' | 'special'
+  triggerCondition: {
+    type: 'random' | 'scene_enter' | 'evidence_found' | 'sanity_level' | 'talent_based'
+    chance?: number
+    sanityThreshold?: number
+    requiredTalent?: string
+    requiredScene?: string
+  }
+  effects: {
+    sanity?: number
+    clueDiscovery?: string[]
+    evidenceBonus?: number
+    unlockEvent?: string
+  }
+  triggered: boolean
+}
+
+export interface GameState {
+  currentCase: string | null
+  sanity: number
+  maxSanity: number
+  discoveredEvidence: string[]
+  discoveredClues: string[]
+  analyzedClues: string[]
+  clueConnections: ClueConnection[]
+  visitedScenes: string[]
+  gameLog: GameLogEntry[]
+  startTime: number
+  lastSaveTime: number
+  tools: Tool[]
+  selectedToolId: string | null
+  failedSearches: string[]
+  deductionBranches: string[]
+  characterProfileId: string | null
+  triggeredEvents: string[]
+}
+
+export interface SaveData {
+  id: string
+  name: string
+  caseId: string
+  gameState: GameState
+  createdAt: number
+  updatedAt: number
+  screenshot?: string
+  isNewGamePlus?: boolean
+  inheritedTools?: string[]
+  characterProfileId?: string
+}

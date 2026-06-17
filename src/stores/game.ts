@@ -1,11 +1,30 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
+import { useCharacterStore } from './character'
+import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 
 export const useGameStore = defineStore('game', () => {
+  const characterStore = useCharacterStore()
+  
+  const activeCharacterId = computed(() => characterStore.activeProfile?.id || null)
+  
+  const currentTalentIds = computed(() => characterStore.activeTalentIds)
+  
+  const talentEffects = computed(() => ({
+    sanityCostReduction: characterStore.getTalentEffect('sanity_cost_reduction'),
+    maxSanityBonus: characterStore.getTalentEffect('max_sanity_bonus'),
+    evidenceHitRateBonus: characterStore.getTalentEffect('evidence_hit_rate'),
+    clueAnalysisSpeed: characterStore.getTalentEffect('clue_analysis_speed'),
+    clueDiscoveryBonus: characterStore.getTalentEffect('clue_discovery_bonus'),
+    eventTriggerChance: characterStore.getTalentEffect('event_trigger_chance'),
+    toolDurabilityBonus: characterStore.getTalentEffect('tool_durability_bonus'),
+    sanityRecoveryBonus: characterStore.getTalentEffect('sanity_recovery_bonus')
+  }))
+
   const gameState = ref<GameState>({
     currentCase: null,
     sanity: 100,
@@ -21,7 +40,9 @@ export const useGameStore = defineStore('game', () => {
     tools: [],
     selectedToolId: null,
     failedSearches: [],
-    deductionBranches: []
+    deductionBranches: [],
+    characterProfileId: null,
+    triggeredEvents: []
   })
 
   const currentCase = computed(() => {
@@ -54,6 +75,8 @@ export const useGameStore = defineStore('game', () => {
     const caseData = getCaseById(caseId)
     if (!caseData) return false
 
+    resetEvents()
+    
     const baseToolIds = caseData.startingTools || defaultStartingTools
     
     let finalToolIds: string[]
@@ -69,10 +92,16 @@ export const useGameStore = defineStore('game', () => {
       .map(id => createToolInstance(id))
       .filter((t): t is Tool => t !== null)
 
+    const baseMaxSanity = 100
+    const maxSanityBonus = talentEffects.value.maxSanityBonus
+    const finalMaxSanity = baseMaxSanity + maxSanityBonus
+
+    const charId = activeCharacterId.value
+
     gameState.value = {
       currentCase: caseId,
-      sanity: 100,
-      maxSanity: 100,
+      sanity: finalMaxSanity,
+      maxSanity: finalMaxSanity,
       discoveredEvidence: [],
       discoveredClues: [],
       analyzedClues: [],
@@ -84,14 +113,28 @@ export const useGameStore = defineStore('game', () => {
       tools: startingTools,
       selectedToolId: startingTools.length > 0 ? startingTools[0].id : null,
       failedSearches: [],
-      deductionBranches: []
+      deductionBranches: [],
+      characterProfileId: charId,
+      triggeredEvents: []
+    }
+
+    if (charId) {
+      characterStore.incrementPlayCount(charId)
     }
 
     const bonusTools = startingTools.filter(t => !baseToolIds.includes(t.id))
     addLog('discovery', `开始调查案件：${caseData.title}`)
+    
+    if (characterStore.activeProfile) {
+      addLog('discovery', `调查员：${characterStore.activeProfile.name} - ${characterStore.activeProfile.title}`)
+    }
+    
     addLog('tool_use', `携带工具：${startingTools.map(t => t.name).join('、')}`)
     if (bonusTools.length > 0) {
       addLog('discovery', `继承工具：${bonusTools.map(t => t.name).join('、')}`)
+    }
+    if (maxSanityBonus > 0) {
+      addLog('discovery', `天赋加成：最大理智值 +${maxSanityBonus}`)
     }
 
     setCaseStatus(caseId, 'in_progress')
@@ -99,11 +142,24 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function modifySanity(amount: number, reason: string) {
-    gameState.value.sanity = Math.max(0, Math.min(gameState.value.maxSanity, gameState.value.sanity + amount))
+    let finalAmount = amount
     
     if (amount < 0) {
-      addLog('sanity_loss', `理智值下降 ${Math.abs(amount)} 点：${reason}`)
+      const reductionPercent = talentEffects.value.sanityCostReduction
+      const reduction = Math.abs(amount) * (reductionPercent / 100)
+      finalAmount = -(Math.abs(amount) - reduction)
+      
+      const actualLoss = Math.abs(finalAmount)
+      addLog('sanity_loss', `理智值下降 ${actualLoss} 点（天赋减免 ${Math.abs(amount) - actualLoss} 点）：${reason}`)
+    } else if (amount > 0) {
+      const recoveryBonus = talentEffects.value.sanityRecoveryBonus
+      const bonus = amount * (recoveryBonus / 100)
+      finalAmount = amount + bonus
+      
+      addLog('discovery', `理智值恢复 ${finalAmount} 点（天赋加成 ${bonus.toFixed(1)} 点）：${reason}`)
     }
+    
+    gameState.value.sanity = Math.max(0, Math.min(gameState.value.maxSanity, gameState.value.sanity + finalAmount))
 
     if (gameState.value.sanity <= 0) {
       return 'insane'
@@ -132,9 +188,10 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
+    const talentBonus = talentEffects.value.evidenceHitRateBonus
     const sanityPenalty = getSanityPenalty(gameState.value.sanity, gameState.value.maxSanity)
 
-    let finalRate = baseRate + toolBonus - durabilityPenalty - sanityPenalty
+    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty
     finalRate = Math.max(5, Math.min(95, finalRate))
 
     const isGuaranteed = finalRate >= 95
@@ -142,7 +199,7 @@ export const useGameStore = defineStore('game', () => {
 
     return {
       baseRate,
-      toolBonus,
+      toolBonus: toolBonus + talentBonus,
       durabilityPenalty,
       sanityPenalty,
       finalRate,
@@ -178,8 +235,10 @@ export const useGameStore = defineStore('game', () => {
 
     if (selectedToolData && selectedToolData.uses > 0 && selectedToolData.durability > 0) {
       const baseDurabilityLoss = Math.floor(Math.random() * 5) + 3
-      durabilityLost = baseDurabilityLoss
-      consumeToolDurability(selectedToolData.id, 1, baseDurabilityLoss)
+      const durabilityReductionPercent = talentEffects.value.toolDurabilityBonus
+      const reducedDurabilityLoss = Math.max(1, Math.floor(baseDurabilityLoss * (1 - durabilityReductionPercent / 100)))
+      durabilityLost = reducedDurabilityLoss
+      consumeToolDurability(selectedToolData.id, 1, reducedDurabilityLoss)
     }
 
     const roll = Math.random() * 100
@@ -255,7 +314,12 @@ export const useGameStore = defineStore('game', () => {
     if (gameState.value.analyzedClues.includes(clueId)) return false
 
     gameState.value.analyzedClues.push(clueId)
-    addLog('analysis', `分析线索：${clueId} - ${result}`)
+    const analysisBonus = talentEffects.value.clueAnalysisSpeed
+    if (analysisBonus > 0) {
+      addLog('analysis', `分析线索：${clueId} - ${result}（分析效率 +${analysisBonus}%）`)
+    } else {
+      addLog('analysis', `分析线索：${clueId} - ${result}`)
+    }
     return true
   }
 
@@ -275,7 +339,66 @@ export const useGameStore = defineStore('game', () => {
     if (!gameState.value.visitedScenes.includes(sceneId)) {
       gameState.value.visitedScenes.push(sceneId)
       addLog('discovery', `探索新场景：${sceneId}`)
+      
+      triggerRandomEvents('scene_enter')
+    } else {
+      triggerRandomEvents('random')
     }
+    triggerRandomEvents('talent_based')
+    triggerRandomEvents('sanity_level')
+  }
+
+  function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
+    const availableEvents = getEventsForTrigger(
+      triggerType,
+      currentTalentIds.value,
+      gameState.value.sanity
+    )
+    
+    const eventTriggerBonus = talentEffects.value.eventTriggerChance
+    
+    for (const event of availableEvents) {
+      if (gameState.value.triggeredEvents.includes(event.id)) continue
+      
+      if (checkEventTrigger(event, currentTalentIds.value, eventTriggerBonus)) {
+        triggerEvent(event)
+        break
+      }
+    }
+  }
+
+  function triggerEvent(event: SceneEvent): boolean {
+    if (gameState.value.triggeredEvents.includes(event.id)) return false
+    
+    event.triggered = true
+    gameState.value.triggeredEvents.push(event.id)
+    
+    addLog('discovery', `触发事件：${event.name}`)
+    addLog('discovery', event.description)
+    
+    if (event.effects.sanity !== undefined) {
+      if (event.effects.sanity > 0) {
+        modifySanity(event.effects.sanity, `事件：${event.name}`)
+      } else {
+        modifySanity(event.effects.sanity, `事件：${event.name}`)
+      }
+    }
+    
+    if (event.effects.clueDiscovery) {
+      event.effects.clueDiscovery.forEach(clueId => {
+        discoverClue(clueId)
+      })
+    }
+    
+    if (event.effects.evidenceBonus) {
+      addLog('discovery', `证据发现率临时提升 ${event.effects.evidenceBonus}%`)
+    }
+    
+    return true
+  }
+
+  function hasTriggeredEvent(eventId: string): boolean {
+    return gameState.value.triggeredEvents.includes(eventId)
   }
 
   function selectTool(toolId: string | null) {
@@ -366,6 +489,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function resetGame() {
+    resetEvents()
     gameState.value = {
       currentCase: null,
       sanity: 100,
@@ -381,7 +505,9 @@ export const useGameStore = defineStore('game', () => {
       tools: [],
       selectedToolId: null,
       failedSearches: [],
-      deductionBranches: []
+      deductionBranches: [],
+      characterProfileId: null,
+      triggeredEvents: []
     }
   }
 
@@ -393,6 +519,8 @@ export const useGameStore = defineStore('game', () => {
     isCriticalSanity,
     availableTools,
     selectedTool,
+    activeCharacterId,
+    talentEffects,
     startCase,
     modifySanity,
     calculateHitRate,
@@ -412,6 +540,9 @@ export const useGameStore = defineStore('game', () => {
     loadGameState,
     unlockDeductionBranch,
     hasDeductionBranch,
+    triggerRandomEvents,
+    triggerEvent,
+    hasTriggeredEvent,
     resetGame
   }
 })
