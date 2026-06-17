@@ -10,6 +10,39 @@ export interface Case {
   sanityCost: number
   recommendedSanity: number
   startingTools?: string[]
+  chapter: number
+  prerequisites: string[]
+  rewards: CaseRewards
+  branchRewards?: Record<string, CaseRewards>
+}
+
+export interface CaseRewards {
+  tools: string[]
+  unlocksCases: string[]
+  sanityBonus: number
+  description: string
+}
+
+export interface CaseProgress {
+  caseId: string
+  completed: boolean
+  completedAt?: number
+  playCount: number
+  unlockedBranches: string[]
+  bestEnding?: string
+  discoveredEvidence: string[]
+  discoveredClues: string[]
+  totalSanityLost: number
+}
+
+export interface ChapterNode {
+  id: string
+  chapter: number
+  title: string
+  status: 'locked' | 'available' | 'in_progress' | 'completed'
+  prerequisites: string[]
+  children: string[]
+  isLocked: boolean
 }
 
 export interface Scene {

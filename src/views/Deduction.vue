@@ -3,19 +3,16 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
-import { getCaseById, unlockNextCase, getEvidenceById, completeCase } from '@/data/cases'
+import { useProgressStore } from '@/stores/progress'
+import { getCaseById, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
-import type { ConclusionOption } from '@/types'
-
-const branchRewardMap: Record<string, string[]> = {
-  'standard': [],
-  'deep-truth': ['tool-magnifier-pro', 'tool-uv-light-advanced']
-}
+import type { ConclusionOption, CaseRewards } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
 const saveStore = useSaveStore()
+const progressStore = useProgressStore()
 
 const selectedConclusion = ref<string | null>(null)
 const showResult = ref(false)
@@ -24,6 +21,9 @@ const isCorrect = ref(false)
 const sanityLost = ref(0)
 const unlockedBranch = ref<string | null>(null)
 const branchRewards = ref<string[]>([])
+const caseRewards = ref<CaseRewards | null>(null)
+const isFirstCompletion = ref(false)
+const newlyUnlockedCases = ref<string[]>([])
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -138,6 +138,9 @@ function makeDeduction() {
   resultMessage.value = option.feedback
   sanityLost.value = option.sanityCost
   branchRewards.value = []
+  caseRewards.value = null
+  isFirstCompletion.value = false
+  newlyUnlockedCases.value = []
   
   if (option.branch) {
     unlockedBranch.value = option.branch
@@ -154,26 +157,43 @@ function makeDeduction() {
       sanityLost: option.sanityCost,
       branch: option.branch
     })
-    
-    completeCase(caseData.value.id)
-    unlockNextCase(caseData.value.id)
-  }
 
-  if (option.branch && branchRewardMap[option.branch]) {
-    const rewards = branchRewardMap[option.branch]
-    rewards.forEach(toolId => {
-      const tool = getToolById(toolId)
-      if (tool) {
-        saveStore.unlockGlobalTool(toolId)
-        branchRewards.value.push(tool.name)
-        gameStore.addLog('discovery', `解锁全局工具：${tool.name}`)
+    const prevCompleted = progressStore.getProgress(caseData.value.id)?.completed
+    isFirstCompletion.value = !prevCompleted
+
+    const rewards = progressStore.recordCaseCompletion(
+      caseData.value.id,
+      option.id,
+      option.branch,
+      option.sanityCost
+    )
+    caseRewards.value = rewards
+
+    if (rewards) {
+      const rewardToolNames = rewards.tools
+        .map(id => getToolById(id)?.name || id)
+      branchRewards.value = rewardToolNames
+
+      newlyUnlockedCases.value = rewards.unlocksCases
+        .map(id => getCaseById(id)?.title || id)
+
+      if (rewards.sanityBonus > 0) {
+        gameStore.modifySanity(rewards.sanityBonus, '案件完成奖励')
       }
-    })
+
+      gameStore.addLog('discovery', `案件奖励：${rewards.description}`)
+    }
+
+    progressStore.updateDiscoveredItems(
+      caseData.value.id,
+      gameStore.gameState.discoveredEvidence,
+      gameStore.gameState.discoveredClues
+    )
+
+    const saveName = `[结算] ${caseData.value.title} - ${new Date().toLocaleString('zh-CN')}`
+    saveStore.createSave(saveName)
   }
 
-  const saveName = `[结算] ${caseData.value.title} - ${new Date().toLocaleString('zh-CN')}`
-  saveStore.createSave(saveName)
-  
   showResult.value = true
 }
 
@@ -440,6 +460,7 @@ function getBranchInfo(branch: string): { name: string; description: string } {
             <h2 class="result-title">
               {{ isCorrect ? '推演正确！' : '推演失败...' }}
             </h2>
+            <p v-if="isFirstCompletion" class="first-clear-badge">🏆 首次通关！</p>
             <p class="result-message">{{ resultMessage }}</p>
 
             <div v-if="unlockedBranch" class="branch-unlock">
@@ -448,13 +469,27 @@ function getBranchInfo(branch: string): { name: string; description: string } {
             </div>
 
             <div v-if="branchRewards.length > 0" class="branch-rewards">
-              <p class="rewards-title">🎁 继承奖励已解锁</p>
-              <p class="rewards-desc">以下工具将在新案件中可用：</p>
-              <div class="rewards-list">
+              <p class="rewards-title">🎁 案件奖励</p>
+              <p class="rewards-desc">{{ caseRewards?.description }}</p>
+              <div v-if="branchRewards.length > 0" class="rewards-list">
                 <span v-for="name in branchRewards" :key="name" class="reward-tag">
-                  {{ name }}
+                  🔧 {{ name }}
                 </span>
               </div>
+            </div>
+
+            <div v-if="newlyUnlockedCases.length > 0" class="new-cases-unlock">
+              <p class="unlock-title">🔓 新案件解锁</p>
+              <div class="unlocked-cases-list">
+                <span v-for="name in newlyUnlockedCases" :key="name" class="case-tag">
+                  📁 {{ name }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="caseRewards?.sanityBonus && caseRewards.sanityBonus > 0" class="sanity-bonus">
+              <span class="bonus-icon">💚</span>
+              <span>理智恢复：+{{ caseRewards.sanityBonus }}</span>
             </div>
             
             <div v-if="sanityLost > 0" class="result-sanity">
@@ -1041,6 +1076,19 @@ function getBranchInfo(branch: string): { name: string; description: string } {
   color: var(--color-danger);
 }
 
+.first-clear-badge {
+  color: #ffd700;
+  font-size: 1.1rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .result-message {
   color: var(--color-text);
   line-height: 1.6;
@@ -1099,6 +1147,58 @@ function getBranchInfo(branch: string): { name: string; description: string } {
   color: var(--color-accent-light);
   font-size: 0.8rem;
   font-weight: bold;
+}
+
+.new-cases-unlock {
+  padding: 0.75rem;
+  background: rgba(58, 139, 90, 0.15);
+  border: 1px solid var(--color-success);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.unlock-title {
+  color: var(--color-success);
+  font-weight: bold;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+
+.unlocked-cases-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.case-tag {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: rgba(58, 139, 90, 0.2);
+  border: 1px solid var(--color-success);
+  border-radius: 12px;
+  color: var(--color-success);
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.sanity-bonus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(58, 139, 90, 0.1);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  color: var(--color-success);
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.bonus-icon {
+  font-size: 1.1rem;
 }
 
 .result-sanity {

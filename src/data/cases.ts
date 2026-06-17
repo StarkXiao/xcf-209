@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import type { Case } from '@/types'
 
-export const cases: Case[] = reactive([
+export const cases = reactive<Case[]>([
   {
     id: 'case-001',
     title: '消失的灯塔守望者',
@@ -11,6 +11,28 @@ export const cases: Case[] = reactive([
     sanityCost: 15,
     recommendedSanity: 80,
     startingTools: ['tool-magnifier-basic', 'tool-fingerprint-kit', 'tool-uv-light'],
+    chapter: 1,
+    prerequisites: [],
+    rewards: {
+      tools: ['tool-recorder'],
+      unlocksCases: ['case-002'],
+      sanityBonus: 10,
+      description: '解锁录音笔，可捕捉声音类证据'
+    },
+    branchRewards: {
+      'standard': {
+        tools: ['tool-recorder'],
+        unlocksCases: ['case-002'],
+        sanityBonus: 10,
+        description: '标准结局奖励'
+      },
+      'deep-truth': {
+        tools: ['tool-magnifier-pro', 'tool-uv-light-advanced', 'tool-lockpick', 'tool-recorder'],
+        unlocksCases: ['case-002'],
+        sanityBonus: 20,
+        description: '深渊真相结局奖励：解锁全套高级工具'
+      }
+    },
     scenes: [
       {
         id: 'scene-lighthouse',
@@ -356,6 +378,15 @@ export const cases: Case[] = reactive([
     sanityCost: 25,
     recommendedSanity: 70,
     startingTools: ['tool-magnifier-basic', 'tool-fingerprint-kit', 'tool-uv-light', 'tool-recorder'],
+    chapter: 2,
+    prerequisites: ['case-001'],
+    rewards: {
+      tools: ['tool-chemical-analyzer'],
+      unlocksCases: ['case-003'],
+      sanityBonus: 15,
+      description: '解锁化学分析仪，可分析微量物质证据'
+    },
+    branchRewards: {},
     scenes: [],
     clues: [],
     conclusion: {
@@ -375,7 +406,8 @@ export const cases: Case[] = reactive([
           text: '地下室藏有禁忌的知识，会侵蚀接触者的心智',
           isCorrect: true,
           sanityCost: 15,
-          feedback: '某些知识确实不应该被人类知晓...'
+          feedback: '某些知识确实不应该被人类知晓...',
+          branch: 'standard'
         }
       ]
     }
@@ -389,6 +421,15 @@ export const cases: Case[] = reactive([
     sanityCost: 35,
     recommendedSanity: 60,
     startingTools: ['tool-magnifier-pro', 'tool-uv-light-advanced', 'tool-chemical-analyzer'],
+    chapter: 3,
+    prerequisites: ['case-002'],
+    rewards: {
+      tools: [],
+      unlocksCases: [],
+      sanityBonus: 25,
+      description: '完成所有案件的最终奖励'
+    },
+    branchRewards: {},
     scenes: [],
     clues: [],
     conclusion: {
@@ -408,7 +449,8 @@ export const cases: Case[] = reactive([
           text: '画作是通往另一个维度的门户',
           isCorrect: true,
           sanityCost: 20,
-          feedback: '艺术有时能够打开通往未知的大门...'
+          feedback: '艺术有时能够打开通往未知的大门...',
+          branch: 'standard'
         }
       ]
     }
