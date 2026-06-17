@@ -58,7 +58,6 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function modifySanity(amount: number, reason: string) {
-    const oldSanity = gameState.value.sanity
     gameState.value.sanity = Math.max(0, Math.min(gameState.value.maxSanity, gameState.value.sanity + amount))
     
     if (amount < 0) {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { SaveData, GameState } from '@/types'
+import type { SaveData } from '@/types'
 import { useGameStore } from './game'
 
 const STORAGE_KEY = 'cthulhu-game-saves'
@@ -128,6 +128,7 @@ export const useSaveStore = defineStore('save', () => {
     saves,
     saveCount,
     hasSaves,
+    maxSaves,
     createSave,
     loadSave,
     deleteSave,

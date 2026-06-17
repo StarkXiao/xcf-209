@@ -121,6 +121,18 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
           <div class="locked-icon">🔐</div>
           <p class="locked-text">完成前置案件以解锁</p>
         </div>
+        
+        <div v-if="caseItem.status !== 'locked' && caseItem.status !== 'completed'" class="case-actions">
+          <button class="start-btn primary" @click.stop="selectCase(caseItem)">
+            {{ caseItem.status === 'in_progress' && gameStore.currentCase?.id === caseItem.id ? '继续调查' : '开始调查' }}
+          </button>
+        </div>
+        
+        <div v-if="caseItem.status === 'completed'" class="case-actions">
+          <button class="completed-btn" disabled>
+            ✓ 已结案
+          </button>
+        </div>
       </div>
     </div>
 
@@ -300,6 +312,26 @@ function getCaseProgress(caseItem: typeof cases[0]): number {
 .locked-text {
   color: var(--color-text-dim);
   font-size: 0.9rem;
+}
+
+.case-actions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.start-btn {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1rem;
+}
+
+.completed-btn {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 1rem;
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .investigator-tips {

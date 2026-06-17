@@ -56,8 +56,15 @@ function isClueAnalyzed(clueId: string) {
   return gameStore.gameState.analyzedClues.includes(clueId)
 }
 
-function selectClue(clue: Clue) {
-  selectedClue.value = clue
+function handleClueClick(clue: Clue) {
+  if (connectingFrom.value) {
+    if (connectingFrom.value !== clue.id) {
+      completeConnection(clue.id)
+    }
+    selectedClue.value = clue
+  } else {
+    selectedClue.value = clue
+  }
   showAnalysis.value = false
   analysisResult.value = ''
 }
@@ -73,6 +80,16 @@ function startConnection(clueId: string) {
 function completeConnection(targetClueId: string) {
   if (!connectingFrom.value || connectingFrom.value === targetClueId) return
   
+  const exists = gameStore.gameState.clueConnections.some(
+    c => (c.clue1Id === connectingFrom.value && c.clue2Id === targetClueId) ||
+         (c.clue1Id === targetClueId && c.clue2Id === connectingFrom.value)
+  )
+  
+  if (exists) {
+    connectingFrom.value = null
+    return
+  }
+  
   const connection: ClueConnection = {
     clue1Id: connectingFrom.value,
     clue2Id: targetClueId,
@@ -82,6 +99,14 @@ function completeConnection(targetClueId: string) {
   
   gameStore.addClueConnection(connection)
   connectingFrom.value = null
+}
+
+function connectPotential(targetClueId: string) {
+  if (!selectedClue.value) return
+  if (selectedClue.value.id === targetClueId) return
+  
+  connectingFrom.value = selectedClue.value.id
+  completeConnection(targetClueId)
 }
 
 function analyzeClue(clue: Clue) {
@@ -147,9 +172,10 @@ function goToDeduction() {
                 class="clue-item"
                 :class="{ 
                   selected: selectedClue?.id === clue.id,
-                  connecting: connectingFrom === clue.id
+                  connecting: connectingFrom === clue.id,
+                  'can-connect': connectingFrom && connectingFrom !== clue.id
                 }"
-                @click="selectClue(clue)"
+                @click="handleClueClick(clue)"
               >
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
@@ -174,9 +200,10 @@ function goToDeduction() {
                 class="clue-item analyzed"
                 :class="{ 
                   selected: selectedClue?.id === clue.id,
-                  connecting: connectingFrom === clue.id
+                  connecting: connectingFrom === clue.id,
+                  'can-connect': connectingFrom && connectingFrom !== clue.id
                 }"
-                @click="selectClue(clue)"
+                @click="handleClueClick(clue)"
               >
                 <div class="clue-header">
                   <span class="clue-name">{{ clue.name }}</span>
@@ -215,13 +242,15 @@ function goToDeduction() {
               </div>
 
               <div v-if="selectedClue.connections.length > 0" class="detail-section">
-                <h4>潜在关联</h4>
+                <h4>潜在关联 <span class="hint">(点击快速建立关联)</span></h4>
                 <div class="potential-connections">
                   <div 
                     v-for="connId in selectedClue.connections" 
                     :key="connId"
-                    class="potential-conn"
+                    class="potential-conn clickable"
+                    @click="connectPotential(connId)"
                   >
+                    <span class="conn-icon">🔗</span>
                     {{ getClueById(connId)?.name || connId }}
                   </div>
                 </div>
@@ -412,6 +441,16 @@ function goToDeduction() {
   box-shadow: 0 0 10px rgba(139, 107, 58, 0.3);
 }
 
+.clue-item.can-connect {
+  border-color: var(--color-success);
+  animation: pulse-border 1.5s infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 5px rgba(58, 139, 90, 0.3); }
+  50% { box-shadow: 0 0 15px rgba(58, 139, 90, 0.6); }
+}
+
 .clue-item.analyzed {
   opacity: 0.8;
 }
@@ -499,6 +538,15 @@ function goToDeduction() {
   font-size: 0.95rem;
   color: var(--color-text);
   margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.detail-section h4 .hint {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  font-weight: normal;
 }
 
 .detail-section p {
@@ -525,6 +573,21 @@ function goToDeduction() {
   border-radius: 12px;
   font-size: 0.85rem;
   color: var(--color-text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.potential-conn.clickable {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.potential-conn.clickable:hover {
+  background: rgba(107, 76, 154, 0.4);
+  border-color: var(--color-accent-light);
+  color: var(--color-text);
+  transform: translateY(-1px);
 }
 
 .established-conn {
