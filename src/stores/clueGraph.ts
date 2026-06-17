@@ -375,7 +375,7 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     sourceId: string, 
     targetId: string, 
     relationship: string,
-    confidence: number = 50
+    confidence?: number
   ): GraphEdge | null {
     if (sourceId === targetId) {
       addError('不能连接到自己', 'error')
@@ -400,12 +400,17 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       return null
     }
 
+    let actualConfidence = confidence
+    if (actualConfidence === undefined) {
+      actualConfidence = gameStore.getConnectionSuccessRate(sourceId, targetId)
+    }
+
     const newEdge: GraphEdge = {
       id: generateId(),
       sourceId,
       targetId,
       relationship,
-      confidence,
+      confidence: actualConfidence,
       confirmed: false,
       createdAt: Date.now()
     }
@@ -419,6 +424,16 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       data: { edge: newEdge },
       beforeState,
       afterState
+    })
+
+    gameStore.addClueConnection({
+      clue1Id: sourceId,
+      clue2Id: targetId,
+      relationship,
+      confirmed: false,
+      confidence: actualConfidence,
+      supportedBy: [],
+      createdAt: Date.now()
     })
 
     validateGraph()
@@ -440,6 +455,17 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       afterState
     })
 
+    const gameConnIndex = gameStore.gameState.clueConnections.findIndex(
+      c => (c.clue1Id === edge.sourceId && c.clue2Id === edge.targetId) ||
+           (c.clue1Id === edge.targetId && c.clue2Id === edge.sourceId)
+    )
+    if (gameConnIndex !== -1) {
+      const gameConn = gameStore.gameState.clueConnections[gameConnIndex]
+      if (updates.confidence !== undefined) gameConn.confidence = updates.confidence
+      if (updates.confirmed !== undefined) gameConn.confirmed = updates.confirmed
+      if (updates.relationship !== undefined) gameConn.relationship = updates.relationship
+    }
+
     validateGraph()
   }
 
@@ -450,6 +476,11 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     const beforeState = { edges: [...graphState.value.edges] }
     graphState.value.edges = graphState.value.edges.filter(e => e.id !== edgeId)
     const afterState = { edges: [...graphState.value.edges] }
+
+    gameStore.gameState.clueConnections = gameStore.gameState.clueConnections.filter(
+      c => !((c.clue1Id === edge.sourceId && c.clue2Id === edge.targetId) ||
+             (c.clue1Id === edge.targetId && c.clue2Id === edge.sourceId))
+    )
 
     addAction({
       type: 'edge_remove',
@@ -684,8 +715,25 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
   function completeConnection(targetNodeId: string, relationship: string): GraphEdge | null {
     if (!connectingFrom.value) return null
     
-    const result = addEdge(connectingFrom.value, targetNodeId, relationship)
+    const sourceId = connectingFrom.value
     connectingFrom.value = null
+
+    const successRate = gameStore.getConnectionSuccessRate(sourceId, targetNodeId)
+    const roll = Math.random() * 100
+    const isInitiallyCorrect = roll < successRate
+
+    const result = addEdge(sourceId, targetNodeId, relationship, successRate)
+    
+    if (result) {
+      if (isInitiallyCorrect) {
+        addError(`连线建立成功！（匹配度 ${successRate}%）`, 'warning')
+        gameStore.addLog('connection', `建立线索关联：${sourceId} ↔ ${targetNodeId}，匹配度 ${successRate}%，初步验证通过`)
+      } else {
+        addError(`连线已建立，但需要进一步验证（匹配度 ${successRate}%）`, 'warning')
+        gameStore.addLog('connection', `建立线索关联：${sourceId} ↔ ${targetNodeId}，匹配度 ${successRate}%，需要确认`)
+      }
+    }
+    
     return result
   }
 
@@ -722,8 +770,36 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     validateGraph()
   }
 
-  function confirmEdge(edgeId: string) {
-    updateEdge(edgeId, { confirmed: true, confidence: 100 })
+  function confirmEdge(edgeId: string): { success: boolean; finalConfidence: number } {
+    const edge = graphState.value.edges.find(e => e.id === edgeId)
+    if (!edge) return { success: false, finalConfidence: 0 }
+
+    const currentConfidence = edge.confidence
+    const successRate = gameStore.getConnectionSuccessRate(edge.sourceId, edge.targetId)
+    const finalRate = Math.max(currentConfidence, successRate)
+
+    const roll = Math.random() * 100
+    const success = roll < finalRate
+
+    const sourceLabel = graphState.value.nodes.find(n => n.id === edge.sourceId)?.label || edge.sourceId
+    const targetLabel = graphState.value.nodes.find(n => n.id === edge.targetId)?.label || edge.targetId
+
+    if (success) {
+      const bonusConfidence = Math.min(100, finalRate + 10)
+      updateEdge(edgeId, { confirmed: true, confidence: bonusConfidence })
+      addError(`✅ 关系确认成功！「${sourceLabel}」与「${targetLabel}」的关系已验证（置信度 ${bonusConfidence}%）`, 'warning')
+      gameStore.addLog('connection', `确认线索关联：${sourceLabel} ↔ ${targetLabel}，验证成功，最终置信度 ${bonusConfidence}%`)
+      gameStore.generateDeductionHints()
+      return { success: true, finalConfidence: bonusConfidence }
+    } else {
+      const penaltyConfidence = Math.max(10, finalRate - 20)
+      updateEdge(edgeId, { confirmed: false, confidence: penaltyConfidence })
+      addError(`❌ 关系确认失败！「${sourceLabel}」与「${targetLabel}」的关联证据不足（置信度降至 ${penaltyConfidence}%）`, 'error')
+      gameStore.addLog('connection', `确认线索关联失败：${sourceLabel} ↔ ${targetLabel}，置信度降至 ${penaltyConfidence}%，建议补充批注、比对或可信度标记`)
+      gameStore.modifySanity(-2, '错误的线索关联判断')
+      gameStore.generateDeductionHints()
+      return { success: false, finalConfidence: penaltyConfidence }
+    }
   }
 
   function startPlayback(speed: number = 1) {

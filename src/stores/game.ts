@@ -2510,31 +2510,84 @@ export const useGameStore = defineStore('game', () => {
     if (comparison) {
       if (comparison.supportsConnection) {
         baseRate = Math.max(baseRate, comparison.connectionConfidence)
+        if (comparison.similarities.length > 0) {
+          baseRate += Math.min(comparison.similarities.length * 3, 12)
+        }
       } else {
         baseRate = Math.min(baseRate, 100 - comparison.connectionConfidence)
+        if (comparison.differences.length > 0) {
+          baseRate -= Math.min(comparison.differences.length * 3, 12)
+        }
       }
     }
     
     const avgConfidence = getAverageConfidenceForClues([clue1Id, clue2Id])
-    const confidenceBonus = (avgConfidence - 50) * 0.3
+    const confidenceBonus = (avgConfidence - 50) * 0.5
     baseRate += confidenceBonus
+    
+    const confidence1 = getClueConfidence(clue1Id)
+    const confidence2 = getClueConfidence(clue2Id)
+    if (confidence1 && confidence2) {
+      const bothHigh = confidence1.confidence >= 70 && confidence2.confidence >= 70
+      if (bothHigh) {
+        baseRate += 8
+      }
+      const eitherLow = confidence1.confidence <= 30 || confidence2.confidence <= 30
+      if (eitherLow) {
+        baseRate -= 10
+      }
+      const bothLow = confidence1.confidence <= 30 && confidence2.confidence <= 30
+      if (bothLow) {
+        baseRate -= 8
+      }
+    }
     
     const clue1 = getClueById(clue1Id)
     const clue2 = getClueById(clue2Id)
     if (clue1 && clue2) {
       if (clue1.connections.includes(clue2Id) || clue2.connections.includes(clue1Id)) {
-        baseRate += 15
+        baseRate += 20
       }
-      const typeMatchBonus = clue1.type === clue2.type ? 10 : 0
+      const typeMatchBonus = clue1.type === clue2.type ? 12 : 0
       baseRate += typeMatchBonus
+      const importanceBonus = Math.min((clue1.importance + clue2.importance - 6) * 3, 10)
+      baseRate += importanceBonus
     }
     
     const annotations1 = getAnnotationsForClue(clue1Id)
     const annotations2 = getAnnotationsForClue(clue2Id)
-    const annotationBonus = Math.min((annotations1.length + annotations2.length) * 3, 15)
+    const totalAnnotations = annotations1.length + annotations2.length
+    const annotationBonus = Math.min(totalAnnotations * 2, 10)
     baseRate += annotationBonus
+
+    const contradictionAnnotations1 = annotations1.filter(a => a.type === 'contradiction').length
+    const contradictionAnnotations2 = annotations2.filter(a => a.type === 'contradiction').length
+    const contradictionPenalty = (contradictionAnnotations1 + contradictionAnnotations2) * 5
+    baseRate -= contradictionPenalty
+
+    const hypothesisAnnotations1 = annotations1.filter(a => a.type === 'hypothesis').length
+    const hypothesisAnnotations2 = annotations2.filter(a => a.type === 'hypothesis').length
+    const hypothesisBonus = (hypothesisAnnotations1 + hypothesisAnnotations2) * 2
+    baseRate += hypothesisBonus
+
+    const importantAnnotations1 = annotations1.filter(a => a.type === 'important').length
+    const importantAnnotations2 = annotations2.filter(a => a.type === 'important').length
+    const importantBonus = (importantAnnotations1 + importantAnnotations2) * 3
+    baseRate += importantBonus
+
+    const questionAnnotations1 = annotations1.filter(a => a.type === 'question').length
+    const questionAnnotations2 = annotations2.filter(a => a.type === 'question').length
+    const questionPenalty = (questionAnnotations1 + questionAnnotations2) * 2
+    baseRate -= questionPenalty
+
+    const bothAnalyzed = gameState.value.analyzedClues.includes(clue1Id) && gameState.value.analyzedClues.includes(clue2Id)
+    if (bothAnalyzed) {
+      baseRate += 10
+    } else if (gameState.value.analyzedClues.includes(clue1Id) || gameState.value.analyzedClues.includes(clue2Id)) {
+      baseRate += 5
+    }
     
-    return Math.max(10, Math.min(95, Math.round(baseRate)))
+    return Math.max(5, Math.min(95, Math.round(baseRate)))
   }
 
   function generateDeductionHints(): DeductionHint[] {
@@ -2542,16 +2595,65 @@ export const useGameStore = defineStore('game', () => {
     const now = Date.now()
     
     gameState.value.clueComparisons.forEach(comparison => {
+      const existingConn = gameState.value.clueConnections.find(
+        c => (c.clue1Id === comparison.clue1Id && c.clue2Id === comparison.clue2Id) ||
+             (c.clue1Id === comparison.clue2Id && c.clue2Id === comparison.clue1Id)
+      )
+
       if (comparison.supportsConnection && comparison.connectionConfidence >= 70) {
-        const exists = gameState.value.clueConnections.some(
-          c => (c.clue1Id === comparison.clue1Id && c.clue2Id === comparison.clue2Id) ||
-               (c.clue1Id === comparison.clue2Id && c.clue2Id === comparison.clue1Id)
-        )
-        if (!exists) {
+        if (!existingConn) {
+          const successRate = getConnectionSuccessRate(comparison.clue1Id, comparison.clue2Id)
           hints.push({
             id: generateAnalysisId(),
             type: 'suggestion',
-            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能存在关联（可信度 ${comparison.connectionConfidence}%）`,
+            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能存在关联（预估连线成功率 ${successRate}%）`,
+            relatedClues: [comparison.clue1Id, comparison.clue2Id],
+            priority: comparison.connectionConfidence,
+            source: 'comparison',
+            createdAt: now
+          })
+        } else if (!existingConn.confirmed) {
+          const currentConf = existingConn.confidence || 50
+          if (currentConf >= 60) {
+            hints.push({
+              id: generateAnalysisId(),
+              type: 'suggestion',
+              content: `「${getClueById(comparison.clue1Id)?.name}」↔「${getClueById(comparison.clue2Id)?.name}」已有比对支持（${comparison.connectionConfidence}%），建议确认该连线`,
+              relatedClues: [comparison.clue1Id, comparison.clue2Id],
+              priority: comparison.connectionConfidence - 10,
+              source: 'comparison',
+              createdAt: now
+            })
+          }
+        }
+      }
+      
+      if (!comparison.supportsConnection && comparison.connectionConfidence >= 60) {
+        if (existingConn && existingConn.confirmed) {
+          hints.push({
+            id: generateAnalysisId(),
+            type: 'contradiction',
+            content: `比对结果与已确认的连线矛盾：「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联，请重新审视`,
+            relatedClues: [comparison.clue1Id, comparison.clue2Id],
+            priority: comparison.connectionConfidence + 10,
+            source: 'comparison',
+            createdAt: now
+          })
+        } else if (existingConn) {
+          hints.push({
+            id: generateAnalysisId(),
+            type: 'warning',
+            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联，建议删除或重新比对`,
+            relatedClues: [comparison.clue1Id, comparison.clue2Id],
+            priority: comparison.connectionConfidence,
+            source: 'comparison',
+            createdAt: now
+          })
+        } else {
+          hints.push({
+            id: generateAnalysisId(),
+            type: 'warning',
+            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联`,
             relatedClues: [comparison.clue1Id, comparison.clue2Id],
             priority: comparison.connectionConfidence,
             source: 'comparison',
@@ -2559,26 +2661,20 @@ export const useGameStore = defineStore('game', () => {
           })
         }
       }
-      
-      if (!comparison.supportsConnection && comparison.connectionConfidence >= 60) {
-        hints.push({
-          id: generateAnalysisId(),
-          type: 'warning',
-          content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联`,
-          relatedClues: [comparison.clue1Id, comparison.clue2Id],
-          priority: comparison.connectionConfidence,
-          source: 'comparison',
-          createdAt: now
-        })
-      }
     })
     
     gameState.value.clueConfidences.forEach(conf => {
       if (conf.confidence <= 30) {
+        const connectedUnconfirmed = gameState.value.clueConnections.filter(
+          c => !c.confirmed && (c.clue1Id === conf.clueId || c.clue2Id === conf.clueId)
+        )
+        const extraNote = connectedUnconfirmed.length > 0 
+          ? `，涉及的 ${connectedUnconfirmed.length} 条未确认连线可能受影响` 
+          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'warning',
-          content: `「${getClueById(conf.clueId)?.name}」的可信度较低（${conf.confidence}%），${conf.reasoning || '需要进一步验证'}`,
+          content: `「${getClueById(conf.clueId)?.name}」的可信度较低（${conf.confidence}%），${conf.reasoning || '需要进一步验证'}${extraNote}`,
           relatedClues: [conf.clueId],
           priority: 100 - conf.confidence,
           source: 'confidence',
@@ -2586,10 +2682,16 @@ export const useGameStore = defineStore('game', () => {
         })
       }
       if (conf.confidence >= 80) {
+        const connectedUnconfirmed = gameState.value.clueConnections.filter(
+          c => !c.confirmed && (c.clue1Id === conf.clueId || c.clue2Id === conf.clueId)
+        )
+        const extraNote = connectedUnconfirmed.length > 0 
+          ? `，可优先确认涉及该线索的 ${connectedUnconfirmed.length} 条连线` 
+          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'insight',
-          content: `「${getClueById(conf.clueId)?.name}」可信度很高（${conf.confidence}%），${conf.reasoning || '可作为核心推理依据'}`,
+          content: `「${getClueById(conf.clueId)?.name}」可信度很高（${conf.confidence}%），${conf.reasoning || '可作为核心推理依据'}${extraNote}`,
           relatedClues: [conf.clueId],
           priority: conf.confidence,
           source: 'confidence',
@@ -2600,12 +2702,18 @@ export const useGameStore = defineStore('game', () => {
     
     gameState.value.clueAnnotations.forEach(annotation => {
       if (annotation.type === 'contradiction') {
+        const connectedConns = gameState.value.clueConnections.filter(
+          c => (c.clue1Id === annotation.clueId || c.clue2Id === annotation.clueId)
+        )
+        const extraNote = connectedConns.length > 0 
+          ? `，该线索的 ${connectedConns.length} 条关联需要谨慎验证` 
+          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'contradiction',
-          content: `「${getClueById(annotation.clueId)?.name}」存在矛盾：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
+          content: `「${getClueById(annotation.clueId)?.name}」存在矛盾：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}${extraNote}`,
           relatedClues: [annotation.clueId],
-          priority: 80,
+          priority: 85,
           source: 'annotation',
           createdAt: now
         })
@@ -2616,12 +2724,69 @@ export const useGameStore = defineStore('game', () => {
           type: 'suggestion',
           content: `假设：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
           relatedClues: [annotation.clueId],
-          priority: 50,
+          priority: 55,
           source: 'annotation',
           createdAt: now
         })
       }
+      if (annotation.type === 'important') {
+        const connectedUnconfirmed = gameState.value.clueConnections.filter(
+          c => !c.confirmed && (c.clue1Id === annotation.clueId || c.clue2Id === annotation.clueId)
+        )
+        if (connectedUnconfirmed.length > 0) {
+          hints.push({
+            id: generateAnalysisId(),
+            type: 'insight',
+            content: `「${getClueById(annotation.clueId)?.name}」被标记为重要线索，建议优先确认其 ${connectedUnconfirmed.length} 条关联连线`,
+            relatedClues: [annotation.clueId],
+            priority: 75,
+            source: 'annotation',
+            createdAt: now
+          })
+        }
+      }
     })
+
+    const unconfirmedConnections = gameState.value.clueConnections.filter(c => !c.confirmed)
+    if (unconfirmedConnections.length > 0) {
+      const highConfidence = unconfirmedConnections.filter(c => (c.confidence || 50) >= 70)
+      if (highConfidence.length > 0) {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'suggestion',
+          content: `有 ${highConfidence.length} 条连线置信度较高（≥70%），建议优先确认以推进推演`,
+          relatedClues: [],
+          priority: 70,
+          source: 'pattern',
+          createdAt: now
+        })
+      }
+      const lowConfidence = unconfirmedConnections.filter(c => (c.confidence || 50) < 40)
+      if (lowConfidence.length > 0) {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'warning',
+          content: `有 ${lowConfidence.length} 条连线置信度较低（<40%），建议补充批注、比对或删除可疑连线`,
+          relatedClues: [],
+          priority: 65,
+          source: 'pattern',
+          createdAt: now
+        })
+      }
+    }
+
+    const confirmedConnections = gameState.value.clueConnections.filter(c => c.confirmed)
+    if (confirmedConnections.length > 0 && unconfirmedConnections.length === 0) {
+      hints.push({
+        id: generateAnalysisId(),
+        type: 'insight',
+        content: `所有 ${confirmedConnections.length} 条连线均已确认，可以进入推演阶段得出结论`,
+        relatedClues: [],
+        priority: 90,
+        source: 'pattern',
+        createdAt: now
+      })
+    }
     
     const analyzedCount = gameState.value.analyzedClues.length
     const confidenceCount = gameState.value.clueConfidences.length
@@ -2629,9 +2794,22 @@ export const useGameStore = defineStore('game', () => {
       hints.push({
         id: generateAnalysisId(),
         type: 'suggestion',
-        content: `建议为已分析的线索标记可信度，这将提高连线成功率和推演准确性`,
+        content: `建议为已分析的线索标记可信度，这将提高连线成功率和推演准确性（已标记 ${confidenceCount}/${analyzedCount}）`,
         relatedClues: [],
         priority: 60,
+        source: 'pattern',
+        createdAt: now
+      })
+    }
+
+    const comparisonCount = gameState.value.clueComparisons.length
+    if (analyzedCount >= 4 && comparisonCount < Math.floor(analyzedCount / 2)) {
+      hints.push({
+        id: generateAnalysisId(),
+        type: 'suggestion',
+        content: `建议对已分析的线索进行比对，比对能显著提高连线的成功率（已比对 ${comparisonCount} 组）`,
+        relatedClues: [],
+        priority: 55,
         source: 'pattern',
         createdAt: now
       })
