@@ -347,6 +347,8 @@ export interface GameState {
   activeAnalyses: ActiveAnalysis[]
   unlockedRecipes: string[]
   craftingHistory: string[]
+  intelligenceState: IntelligenceState
+  mailDeliveryEvents: MailDeliveryEvent[]
 }
 
 export interface SaveData {
@@ -742,3 +744,155 @@ export const RELATIONSHIP_TYPES = [
 ] as const
 
 export type RelationshipType = typeof RELATIONSHIP_TYPES[number]
+
+export interface CasePhase {
+  id: string
+  name: string
+  description: string
+  phaseNumber: number
+  unlockCondition: PhaseUnlockCondition
+  unlockedScenes: string[]
+  unlockedClues: string[]
+  unlockedEvidence: string[]
+  unlockedMails: string[]
+  unlockedDocuments: string[]
+  isActive: boolean
+  isCompleted: boolean
+  intelligenceLevel: number
+}
+
+export interface PhaseUnlockCondition {
+  type: 'evidence_discovered' | 'clue_analyzed' | 'mail_read' | 'document_read' | 'phase_completed' | 'time_elapsed' | 'manual' | 'intelligence_level' | 'sanity_level' | 'scene_visited' | 'custom_event'
+  requiredIds?: string[]
+  count?: number
+  requiredCount?: number
+  requiredPhaseId?: string
+  requiredTimeSeconds?: number
+  intelligenceLevel?: number
+  sanityLevel?: number
+  comparison?: string
+  hours?: number
+  description?: string
+}
+
+export interface Mail {
+  id: string
+  caseId: string
+  subject: string
+  sender: string
+  senderTitle: string
+  senderAvatar?: string
+  recipient: string
+  content: string
+  attachments?: MailAttachment[]
+  sentAt: number
+  isRead: boolean
+  isImportant: boolean
+  sanityEffect?: number
+  phaseId: string
+  intelligenceValue: number
+  hiddenClues?: string[]
+  hiddenEvidence?: string[]
+  unlocksScenes?: string[]
+  unlocksPhases?: string[]
+  replyOptions?: MailReplyOption[]
+  tags: string[]
+}
+
+export interface MailAttachment {
+  id: string
+  name: string
+  type: 'document' | 'image' | 'audio' | 'evidence'
+  referenceId: string
+  description: string
+}
+
+export interface MailReplyOption {
+  id: string
+  text: string
+  nextMailId?: string
+  effect?: {
+    sanity?: number
+    unlockClues?: string[]
+    unlockEvidence?: string[]
+    unlockScenes?: string[]
+    intelligenceBonus?: number
+  }
+}
+
+export interface Document {
+  id: string
+  caseId: string
+  title: string
+  type: 'report' | 'newspaper' | 'diary' | 'letter' | 'official' | 'research'
+  author: string
+  date: string
+  content: string
+  source?: string
+  keywords?: string[]
+  relatedCases?: string[]
+  pages: DocumentPage[]
+  isRead: boolean
+  isClassified: boolean
+  classificationLevel?: number
+  phaseId: string
+  intelligenceValue: number
+  sanityEffect?: number
+  hiddenClues?: string[]
+  hiddenEvidence?: string[]
+  unlocksScenes?: string[]
+  unlocksPhases?: string[]
+  requiredEvidenceToRead?: string[]
+  requiredCluesToRead?: string[]
+  tags: string[]
+}
+
+export interface DocumentPage {
+  id: string
+  pageNumber: number
+  title?: string
+  content: string
+  isUnlocked: boolean
+  requiredEvidence?: string[]
+  requiredClues?: string[]
+  requiredIntelligence?: number
+  notes?: string[]
+  clueReferences?: string[]
+  unlockCondition?: {
+    type: 'evidence' | 'clue' | 'previous_page'
+    requiredIds?: string[]
+  }
+  annotations?: string[]
+}
+
+export interface IntelligenceState {
+  currentPhaseId: string | null
+  completedPhases: string[]
+  readMails: string[]
+  readDocuments: string[]
+  totalIntelligence: number
+  phaseIntelligence: Record<string, number>
+  sceneUnlockProgress: Record<string, number>
+  deductionInfoCompleteness: number
+  mailNotifications: string[]
+  documentNotifications: string[]
+  history: { source: string; value: number; timestamp: number }[]
+}
+
+export interface CaseMailSystem {
+  caseId: string
+  phases: CasePhase[]
+  mails: Mail[]
+  documents: Document[]
+}
+
+export interface MailDeliveryEvent {
+  mailId: string
+  deliveredAt: number
+  delaySeconds: number
+  triggerCondition: {
+    type: 'evidence_discovered' | 'clue_analyzed' | 'scene_visited' | 'phase_started' | 'manual'
+    requiredId?: string
+  }
+  delivered: boolean
+}

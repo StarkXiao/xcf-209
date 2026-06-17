@@ -7,6 +7,9 @@ import { getToolById } from '@/data/tools'
 import type { Scene, Evidence, HitRateResult } from '@/types'
 import InventoryPanel from '@/components/inventory/InventoryPanel.vue'
 import CraftingPanel from '@/components/inventory/CraftingPanel.vue'
+import MailInbox from '@/components/mail/MailInbox.vue'
+import DocumentList from '@/components/documents/DocumentList.vue'
+import PhaseTimeline from '@/components/phases/PhaseTimeline.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,6 +25,27 @@ const hoveredEvidence = ref<Evidence | null>(null)
 const searchResultMessage = ref('')
 const showSearchResult = ref(false)
 const showGameLog = ref(false)
+
+const activeTab = ref<'investigation' | 'mails' | 'documents' | 'phases'>('investigation')
+
+const unreadMailCount = computed(() => gameStore.unreadMailCount)
+const unreadDocumentCount = computed(() => gameStore.unreadDocumentCount)
+
+const tabs = [
+  { id: 'investigation', name: '现场调查', icon: '🔍', badge: 0 },
+  { id: 'mails', name: '案件邮件', icon: '📧', badge: unreadMailCount },
+  { id: 'documents', name: '案件文书', icon: '📚', badge: unreadDocumentCount },
+  { id: 'phases', name: '调查阶段', icon: '📋', badge: 0 }
+]
+
+function getBadgeValue(badge: any): number {
+  if (typeof badge === 'number') return badge
+  return badge?.value || 0
+}
+
+function switchTab(tabId: string) {
+  activeTab.value = tabId as any
+}
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -270,6 +294,35 @@ function getShadowStyle(index: number) {
     </div>
 
     <template v-else>
+      <div class="tabs-navigation">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="tab-btn"
+          :class="{ active: activeTab === tab.id }"
+          @click="switchTab(tab.id)"
+        >
+          <span class="tab-icon">{{ tab.icon }}</span>
+          <span class="tab-name">{{ tab.name }}</span>
+          <span v-if="getBadgeValue(tab.badge) > 0" class="tab-badge">
+            {{ getBadgeValue(tab.badge) }}
+          </span>
+        </button>
+      </div>
+
+      <div v-show="activeTab === 'mails'" class="tab-content">
+        <MailInbox />
+      </div>
+
+      <div v-show="activeTab === 'documents'" class="tab-content">
+        <DocumentList />
+      </div>
+
+      <div v-show="activeTab === 'phases'" class="tab-content">
+        <PhaseTimeline />
+      </div>
+
+      <div v-show="activeTab === 'investigation'">
       <div class="investigation-header">
         <div class="case-info">
           <h1 class="case-title">{{ caseData.title }}</h1>
@@ -663,6 +716,7 @@ function getShadowStyle(index: number) {
           @close="showCraftingPanel = false"
         />
       </transition>
+      </div>
     </template>
   </div>
 </template>
@@ -1855,6 +1909,99 @@ function getShadowStyle(index: number) {
   
   .actions-panel {
     order: 2;
+  }
+}
+
+.tabs-navigation {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.95rem;
+  position: relative;
+}
+
+.tab-btn:hover:not(.active) {
+  background: rgba(107, 76, 154, 0.1);
+  color: var(--color-text);
+}
+
+.tab-btn.active {
+  background: rgba(107, 76, 154, 0.25);
+  border-color: var(--color-accent);
+  color: var(--color-accent-light);
+}
+
+.tab-icon {
+  font-size: 1.2rem;
+}
+
+.tab-name {
+  font-weight: 500;
+}
+
+.tab-badge {
+  background: var(--color-danger);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  min-width: 20px;
+  text-align: center;
+  animation: badge-pulse 2s infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.tab-content {
+  height: calc(100vh - 250px);
+  min-height: 500px;
+}
+
+@media (max-width: 768px) {
+  .tabs-navigation {
+    flex-wrap: wrap;
+  }
+
+  .tab-btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    padding: 0.75rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .tab-name {
+    display: none;
+  }
+
+  .tab-icon {
+    font-size: 1.4rem;
+  }
+
+  .tab-content {
+    height: calc(100vh - 300px);
+    min-height: 400px;
   }
 }
 </style>

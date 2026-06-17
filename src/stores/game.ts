@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -15,6 +15,12 @@ import {
   resetAnomalyEvents,
   getSanityTier 
 } from '@/data/anomalyEvents'
+import { 
+  getMailSystemByCaseId, 
+  getPhasesForCase,
+  createInitialIntelligenceState,
+  mailDeliveryEvents
+} from '@/data/mailSystem'
 
 let timerInterval: ReturnType<typeof setInterval> | null = null
 
@@ -97,7 +103,9 @@ export const useGameStore = defineStore('game', () => {
     },
     activeAnalyses: [],
     unlockedRecipes: [],
-    craftingHistory: []
+    craftingHistory: [],
+    intelligenceState: createInitialIntelligenceState(),
+    mailDeliveryEvents: []
   })
 
   const currentCase = computed(() => {
@@ -174,6 +182,8 @@ export const useGameStore = defineStore('game', () => {
     const charId = activeCharacterId.value
     const timeLimit = caseData.timeLimit || { totalSeconds: 900, sceneSwitchCost: 10, searchAttemptCost: 5, failedSearchPenalty: 15, clueAnalysisCost: 8 }
 
+    const caseDeliveryEvents = mailDeliveryEvents[caseId] || []
+    
     gameState.value = {
       currentCase: caseId,
       sanity: finalMaxSanity,
@@ -215,7 +225,12 @@ export const useGameStore = defineStore('game', () => {
       },
       activeAnalyses: [],
       unlockedRecipes: [],
-      craftingHistory: []
+      craftingHistory: [],
+      intelligenceState: {
+        ...createInitialIntelligenceState(),
+        currentPhaseId: 'phase-1'
+      },
+      mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents))
     }
 
     startTimer()
@@ -458,6 +473,10 @@ export const useGameStore = defineStore('game', () => {
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnEvidence(evidenceId)
 
+    checkPhaseProgression()
+    checkMailDelivery('evidence_discovered', evidenceId)
+    updateDeductionCompleteness()
+
     return true
   }
 
@@ -573,6 +592,9 @@ export const useGameStore = defineStore('game', () => {
     bestiaryStore.checkAndUnlockOnClue(clueId, true)
     
     checkEvidenceRefresh('after_analyze_clue', { clueId })
+    checkPhaseProgression()
+    checkMailDelivery('clue_analyzed', clueId)
+    updateDeductionCompleteness()
     
     return { 
       success: true, 
@@ -708,6 +730,7 @@ export const useGameStore = defineStore('game', () => {
     triggerRandomEvents('sanity_level')
     
     checkEvidenceRefresh('after_scene_switch', { sceneId })
+    checkMailDelivery('scene_visited', sceneId)
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -1263,6 +1286,600 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  const mailSystem = computed(() => {
+    if (!gameState.value.currentCase) return null
+    return getMailSystemByCaseId(gameState.value.currentCase)
+  })
+
+  const currentPhase = computed(() => {
+    if (!mailSystem.value || !gameState.value.intelligenceState.currentPhaseId) return null
+    return mailSystem.value.phases.find(p => p.id === gameState.value.intelligenceState.currentPhaseId) || null
+  })
+
+  const availableMails = computed(() => {
+    if (!mailSystem.value) return []
+    const phaseId = gameState.value.intelligenceState.currentPhaseId
+    if (!phaseId) return []
+    
+    const deliveredMailIds = gameState.value.mailDeliveryEvents
+      .filter(e => e.delivered)
+      .map(e => e.mailId)
+    
+    return mailSystem.value.mails.filter(m => 
+      m.phaseId === phaseId && deliveredMailIds.includes(m.id)
+    ).sort((a, b) => b.sentAt - a.sentAt)
+  })
+
+  const unreadMailCount = computed(() => {
+    return availableMails.value.filter(m => !m.isRead).length
+  })
+
+  const availableDocuments = computed(() => {
+    if (!mailSystem.value) return []
+    const phaseId = gameState.value.intelligenceState.currentPhaseId
+    if (!phaseId) return []
+    
+    return mailSystem.value.documents.filter(d => d.phaseId === phaseId)
+  })
+
+  const unreadDocumentCount = computed(() => {
+    return availableDocuments.value.filter(d => !d.isRead).length
+  })
+
+  const allPhases = computed(() => {
+    if (!gameState.value.currentCase) return []
+    return getPhasesForCase(gameState.value.currentCase)
+  })
+
+  const nextPhase = computed(() => {
+    if (!currentPhase.value) return null
+    return allPhases.value.find(p => p.phaseNumber === currentPhase.value!.phaseNumber + 1) || null
+  })
+
+  const overallProgress = computed(() => {
+    if (!allPhases.value || allPhases.value.length === 0) return 0
+    const completedPhases = allPhases.value.filter(p => p.isCompleted).length
+    const currentPhaseProgress = currentPhase.value?.intelligenceLevel || 0
+    const total = (completedPhases / allPhases.value.length) * 100
+    const currentPhaseContribution = (currentPhaseProgress / allPhases.value.length)
+    return Math.min(100, Math.round(total + currentPhaseContribution))
+  })
+
+  const deductionInfoCompleteness = computed(() => {
+    return gameState.value.intelligenceState.deductionInfoCompleteness
+  })
+
+  function getMailById(mailId: string): Mail | undefined {
+    if (!mailSystem.value) return undefined
+    return mailSystem.value.mails.find(m => m.id === mailId)
+  }
+
+  function getDocumentById(docId: string): Document | undefined {
+    if (!mailSystem.value) return undefined
+    return mailSystem.value.documents.find(d => d.id === docId)
+  }
+
+  function readMail(mailId: string): { success: boolean; unlockedClues: string[]; unlockedEvidence: string[] } {
+    const mail = getMailById(mailId)
+    if (!mail || mail.isRead) return { success: false, unlockedClues: [], unlockedEvidence: [] }
+
+    mail.isRead = true
+    gameState.value.intelligenceState.readMails.push(mailId)
+    
+    addIntelligence(mail.intelligenceValue, `阅读邮件：${mail.subject}`)
+    
+    if (mail.sanityEffect && mail.sanityEffect !== 0) {
+      modifySanity(mail.sanityEffect, '阅读禁忌知识')
+    }
+
+    const unlockedClues: string[] = []
+    const unlockedEvidence: string[] = []
+
+    if (mail.hiddenClues && mail.hiddenClues.length > 0) {
+      mail.hiddenClues.forEach(clueId => {
+        if (!gameState.value.discoveredClues.includes(clueId)) {
+          discoverClue(clueId)
+          unlockedClues.push(clueId)
+        }
+      })
+    }
+
+    if (mail.hiddenEvidence && mail.hiddenEvidence.length > 0) {
+      mail.hiddenEvidence.forEach(evidenceId => {
+        if (!gameState.value.discoveredEvidence.includes(evidenceId)) {
+          unlockHiddenEvidence(evidenceId, `邮件线索：${mail.subject}`)
+          unlockedEvidence.push(evidenceId)
+        }
+      })
+    }
+
+    if (mail.unlocksScenes && mail.unlocksScenes.length > 0) {
+      mail.unlocksScenes.forEach(sceneId => {
+        gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+        addLog('discovery', `解锁新场景：${sceneId}`)
+      })
+    }
+
+    checkPhaseProgression()
+    checkMailDelivery()
+    
+    addLog('discovery', `阅读邮件：${mail.subject}`, {
+      unlockedClues,
+      unlockedEvidence
+    })
+
+    return { success: true, unlockedClues, unlockedEvidence }
+  }
+
+  function replyToMail(mailId: string, replyOption: MailReplyOption): { success: boolean; nextMail?: Mail } {
+    const mail = getMailById(mailId)
+    if (!mail || !mail.replyOptions) return { success: false }
+
+    if (replyOption.effect) {
+      if (replyOption.effect.sanity) {
+        modifySanity(replyOption.effect.sanity, '回复邮件')
+      }
+      if (replyOption.effect.intelligenceBonus) {
+        addIntelligence(replyOption.effect.intelligenceBonus, '回复邮件获得情报')
+      }
+      if (replyOption.effect.unlockClues) {
+        replyOption.effect.unlockClues.forEach(clueId => {
+          if (!gameState.value.discoveredClues.includes(clueId)) {
+            discoverClue(clueId)
+          }
+        })
+      }
+      if (replyOption.effect.unlockEvidence) {
+        replyOption.effect.unlockEvidence.forEach(evidenceId => {
+          if (!gameState.value.discoveredEvidence.includes(evidenceId)) {
+            unlockHiddenEvidence(evidenceId, '回复邮件解锁')
+          }
+        })
+      }
+      if (replyOption.effect.unlockScenes) {
+        replyOption.effect.unlockScenes.forEach(sceneId => {
+          gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+          addLog('discovery', `解锁新场景：${sceneId}`)
+        })
+      }
+    }
+
+    let nextMail: Mail | undefined
+    if (replyOption.nextMailId) {
+      nextMail = getMailById(replyOption.nextMailId)
+      if (nextMail) {
+        const deliveryEvent = gameState.value.mailDeliveryEvents.find(e => e.mailId === replyOption.nextMailId)
+        if (deliveryEvent) {
+          deliveryEvent.delivered = true
+          deliveryEvent.deliveredAt = Date.now()
+        }
+      }
+    }
+
+    addLog('discovery', `回复邮件：${mail.subject} - ${replyOption.text}`)
+    checkPhaseProgression()
+
+    return { success: true, nextMail }
+  }
+
+  function readDocument(docId: string): { success: boolean; unlockedClues: string[]; unlockedPages: number[] } {
+    const doc = getDocumentById(docId)
+    if (!doc) return { success: false, unlockedClues: [], unlockedPages: [] }
+
+    if (doc.requiredEvidenceToRead && doc.requiredEvidenceToRead.length > 0) {
+      const hasAllEvidence = doc.requiredEvidenceToRead.every(eid => 
+        gameState.value.discoveredEvidence.includes(eid)
+      )
+      if (!hasAllEvidence) {
+        return { success: false, unlockedClues: [], unlockedPages: [] }
+      }
+    }
+
+    if (doc.requiredCluesToRead && doc.requiredCluesToRead.length > 0) {
+      const hasAllClues = doc.requiredCluesToRead.every(cid => 
+        gameState.value.discoveredClues.includes(cid)
+      )
+      if (!hasAllClues) {
+        return { success: false, unlockedClues: [], unlockedPages: [] }
+      }
+    }
+
+    doc.isRead = true
+    gameState.value.intelligenceState.readDocuments.push(docId)
+    
+    addIntelligence(doc.intelligenceValue, `阅读文书：${doc.title}`)
+    
+    if (doc.sanityEffect && doc.sanityEffect !== 0) {
+      modifySanity(doc.sanityEffect, '阅读禁忌文书')
+    }
+
+    const unlockedClues: string[] = []
+    const unlockedPages: number[] = []
+
+    doc.pages.forEach(page => {
+      if (page.isUnlocked) {
+        unlockedPages.push(page.pageNumber)
+        return
+      }
+
+      if (page.unlockCondition) {
+        let shouldUnlock = false
+        if (page.unlockCondition.type === 'evidence' && page.unlockCondition.requiredIds) {
+          shouldUnlock = page.unlockCondition.requiredIds.every(eid => 
+            gameState.value.discoveredEvidence.includes(eid)
+          )
+        } else if (page.unlockCondition.type === 'clue' && page.unlockCondition.requiredIds) {
+          shouldUnlock = page.unlockCondition.requiredIds.every(cid => 
+            gameState.value.discoveredClues.includes(cid)
+          )
+        } else if (page.unlockCondition.type === 'previous_page') {
+          const prevPage = doc.pages.find(p => p.pageNumber === page.pageNumber - 1)
+          shouldUnlock = prevPage?.isUnlocked || false
+        }
+
+        if (shouldUnlock) {
+          page.isUnlocked = true
+          unlockedPages.push(page.pageNumber)
+        }
+      }
+    })
+
+    if (doc.hiddenClues && doc.hiddenClues.length > 0) {
+      doc.hiddenClues.forEach(clueId => {
+        if (!gameState.value.discoveredClues.includes(clueId)) {
+          discoverClue(clueId)
+          unlockedClues.push(clueId)
+        }
+      })
+    }
+
+    if (doc.hiddenEvidence && doc.hiddenEvidence.length > 0) {
+      doc.hiddenEvidence.forEach(evidenceId => {
+        if (!gameState.value.discoveredEvidence.includes(evidenceId)) {
+          unlockHiddenEvidence(evidenceId, `文书线索：${doc.title}`)
+        }
+      })
+    }
+
+    if (doc.unlocksScenes && doc.unlocksScenes.length > 0) {
+      doc.unlocksScenes.forEach(sceneId => {
+        gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+        addLog('discovery', `解锁新场景：${sceneId}`)
+      })
+    }
+
+    checkPhaseProgression()
+    
+    addLog('discovery', `阅读文书：${doc.title}`, {
+      unlockedClues,
+      unlockedPages
+    })
+
+    return { success: true, unlockedClues, unlockedPages }
+  }
+
+  function canReadDocument(docId: string): boolean {
+    const doc = getDocumentById(docId)
+    if (!doc) return false
+
+    if (doc.requiredEvidenceToRead && doc.requiredEvidenceToRead.length > 0) {
+      const hasAllEvidence = doc.requiredEvidenceToRead.every(eid => 
+        gameState.value.discoveredEvidence.includes(eid)
+      )
+      if (!hasAllEvidence) return false
+    }
+
+    if (doc.requiredCluesToRead && doc.requiredCluesToRead.length > 0) {
+      const hasAllClues = doc.requiredCluesToRead.every(cid => 
+        gameState.value.discoveredClues.includes(cid)
+      )
+      if (!hasAllClues) return false
+    }
+
+    return true
+  }
+
+  function unlockDocumentPage(docId: string, pageNumber: number): boolean {
+    const doc = getDocumentById(docId)
+    if (!doc) return false
+
+    const page = doc.pages.find(p => p.pageNumber === pageNumber)
+    if (!page || page.isUnlocked) return false
+
+    if (page.unlockCondition) {
+      let shouldUnlock = false
+      if (page.unlockCondition.type === 'evidence' && page.unlockCondition.requiredIds) {
+        shouldUnlock = page.unlockCondition.requiredIds.every(eid => 
+          gameState.value.discoveredEvidence.includes(eid)
+        )
+      } else if (page.unlockCondition.type === 'clue' && page.unlockCondition.requiredIds) {
+        shouldUnlock = page.unlockCondition.requiredIds.every(cid => 
+          gameState.value.discoveredClues.includes(cid)
+        )
+      } else if (page.unlockCondition.type === 'previous_page') {
+        const prevPage = doc.pages.find(p => p.pageNumber === pageNumber - 1)
+        shouldUnlock = prevPage?.isUnlocked || false
+      }
+
+      if (shouldUnlock) {
+        page.isUnlocked = true
+        addLog('discovery', `解锁文书页面：${doc.title} 第${pageNumber}页`)
+        return true
+      }
+    }
+
+    return false
+  }
+
+  function addIntelligence(amount: number, reason: string) {
+    gameState.value.intelligenceState.totalIntelligence += amount
+    
+    const phaseId = gameState.value.intelligenceState.currentPhaseId
+    if (phaseId) {
+      if (!gameState.value.intelligenceState.phaseIntelligence[phaseId]) {
+        gameState.value.intelligenceState.phaseIntelligence[phaseId] = 0
+      }
+      gameState.value.intelligenceState.phaseIntelligence[phaseId] += amount
+      
+      const phase = allPhases.value.find(p => p.id === phaseId)
+      if (phase) {
+        phase.intelligenceLevel = Math.min(100, phase.intelligenceLevel + Math.floor(amount / 2))
+      }
+    }
+
+    gameState.value.intelligenceState.history.push({
+      source: reason,
+      value: amount,
+      timestamp: Date.now()
+    })
+
+    updateDeductionCompleteness()
+    addLog('discovery', `获得情报 +${amount}：${reason}`)
+  }
+
+  function getClueById(clueId: string) {
+    const caseData = currentCase.value
+    if (!caseData) return null
+    return caseData.clues.find(c => c.id === clueId) || null
+  }
+
+  function updateDeductionCompleteness() {
+    const caseData = currentCase.value
+    if (!caseData) return
+
+    const totalEvidence = caseData.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
+    const totalClues = caseData.clues.length
+    const totalMails = mailSystem.value?.mails.length || 0
+    const totalDocs = mailSystem.value?.documents.length || 0
+
+    const discoveredEvidence = gameState.value.discoveredEvidence.length
+    const analyzedClues = gameState.value.analyzedClues.length
+    const readMails = gameState.value.intelligenceState.readMails.length
+    const readDocs = gameState.value.intelligenceState.readDocuments.length
+
+    const evidenceRatio = totalEvidence > 0 ? discoveredEvidence / totalEvidence : 0
+    const clueRatio = totalClues > 0 ? analyzedClues / totalClues : 0
+    const mailRatio = totalMails > 0 ? readMails / totalMails : 0
+    const docRatio = totalDocs > 0 ? readDocs / totalDocs : 0
+
+    const completeness = Math.round(
+      (evidenceRatio * 0.35 + clueRatio * 0.35 + mailRatio * 0.15 + docRatio * 0.15) * 100
+    )
+
+    gameState.value.intelligenceState.deductionInfoCompleteness = Math.min(100, completeness)
+  }
+
+  function checkPhaseProgression() {
+    if (!mailSystem.value) return
+
+    const currentPhaseData = currentPhase.value
+    if (!currentPhaseData) return
+
+    const unlockCondition = currentPhaseData.unlockCondition
+    let shouldComplete = false
+
+    switch (unlockCondition.type) {
+      case 'evidence_discovered':
+        if (unlockCondition.requiredIds && unlockCondition.requiredCount) {
+          const discoveredCount = unlockCondition.requiredIds.filter(id => 
+            gameState.value.discoveredEvidence.includes(id)
+          ).length
+          shouldComplete = discoveredCount >= unlockCondition.requiredCount
+        }
+        break
+      case 'clue_analyzed':
+        if (unlockCondition.requiredIds && unlockCondition.requiredCount) {
+          const analyzedCount = unlockCondition.requiredIds.filter(id => 
+            gameState.value.analyzedClues.includes(id)
+          ).length
+          shouldComplete = analyzedCount >= unlockCondition.requiredCount
+        }
+        break
+      case 'mail_read':
+        if (unlockCondition.requiredIds && unlockCondition.requiredCount) {
+          const readCount = unlockCondition.requiredIds.filter(id => 
+            gameState.value.intelligenceState.readMails.includes(id)
+          ).length
+          shouldComplete = readCount >= unlockCondition.requiredCount
+        }
+        break
+      case 'document_read':
+        if (unlockCondition.requiredIds && unlockCondition.requiredCount) {
+          const readCount = unlockCondition.requiredIds.filter(id => 
+            gameState.value.intelligenceState.readDocuments.includes(id)
+          ).length
+          shouldComplete = readCount >= unlockCondition.requiredCount
+        }
+        break
+      case 'phase_completed':
+        if (unlockCondition.requiredPhaseId) {
+          shouldComplete = gameState.value.intelligenceState.completedPhases.includes(unlockCondition.requiredPhaseId)
+        }
+        break
+      case 'manual':
+        shouldComplete = false
+        break
+    }
+
+    if (shouldComplete) {
+      completeCurrentPhase()
+    }
+  }
+
+  function completeCurrentPhase() {
+    const phaseId = gameState.value.intelligenceState.currentPhaseId
+    if (!phaseId) return
+
+    const phase = currentPhase.value
+    if (!phase || phase.isCompleted) return
+
+    phase.isCompleted = true
+    phase.isActive = false
+    gameState.value.intelligenceState.completedPhases.push(phaseId)
+
+    addLog('discovery', `📋 完成阶段：${phase.name}`)
+    addIntelligence(20, `完成阶段：${phase.name}`)
+
+    const nextPhase = allPhases.value.find(p => p.phaseNumber === phase.phaseNumber + 1)
+    if (nextPhase) {
+      startPhase(nextPhase.id)
+    }
+  }
+
+  function startPhase(phaseId: string) {
+    const phase = allPhases.value.find(p => p.id === phaseId)
+    if (!phase || phase.isActive) return
+
+    phase.isActive = true
+    gameState.value.intelligenceState.currentPhaseId = phaseId
+
+    addLog('discovery', `🔍 进入新阶段：${phase.name}`)
+    addLog('discovery', phase.description)
+
+    if (phase.unlockedScenes && phase.unlockedScenes.length > 0) {
+      phase.unlockedScenes.forEach(sceneId => {
+        gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+        addLog('discovery', `解锁新场景：${sceneId}`)
+      })
+    }
+
+    if (phase.unlockedEvidence && phase.unlockedEvidence.length > 0) {
+      phase.unlockedEvidence.forEach(evidenceId => {
+        unlockHiddenEvidence(evidenceId, `阶段解锁：${phase.name}`)
+      })
+    }
+
+    if (phase.unlockedClues && phase.unlockedClues.length > 0) {
+      phase.unlockedClues.forEach(clueId => {
+        if (!gameState.value.discoveredClues.includes(clueId)) {
+          discoverClue(clueId)
+        }
+      })
+    }
+
+    checkMailDelivery('phase_started', phaseId)
+    updateDeductionCompleteness()
+  }
+
+  function setActivePhase(phaseId: string) {
+    const phase = allPhases.value.find(p => p.id === phaseId)
+    if (!phase || phase.isActive || getPhaseStatus(phase) === 'locked') return
+
+    allPhases.value.forEach(p => {
+      p.isActive = false
+    })
+
+    phase.isActive = true
+    gameState.value.intelligenceState.currentPhaseId = phaseId
+
+    checkMailDelivery('phase_started', phaseId)
+    updateDeductionCompleteness()
+
+    addLog('discovery', `切换到阶段：${phase.name}`)
+  }
+
+  function getPhaseStatus(phase: any): 'completed' | 'active' | 'locked' {
+    if (phase.isCompleted) return 'completed'
+    if (phase.isActive) return 'active'
+    return 'locked'
+  }
+
+  function checkMailDelivery(triggerType?: string, triggerId?: string) {
+    if (!gameState.value.currentCase) return
+
+    const now = Date.now()
+    const events = gameState.value.mailDeliveryEvents
+
+    for (const event of events) {
+      if (event.delivered) continue
+
+      const condition = event.triggerCondition
+      let shouldDeliver = false
+
+      if (triggerType) {
+        if (condition.type === triggerType && condition.requiredId === triggerId) {
+          shouldDeliver = true
+        }
+      } else {
+        switch (condition.type) {
+          case 'evidence_discovered':
+            if (condition.requiredId) {
+              shouldDeliver = gameState.value.discoveredEvidence.includes(condition.requiredId)
+            }
+            break
+          case 'clue_analyzed':
+            if (condition.requiredId) {
+              shouldDeliver = gameState.value.analyzedClues.includes(condition.requiredId)
+            }
+            break
+          case 'scene_visited':
+            if (condition.requiredId) {
+              shouldDeliver = gameState.value.visitedScenes.includes(condition.requiredId)
+            }
+            break
+          case 'phase_started':
+            if (condition.requiredId) {
+              shouldDeliver = gameState.value.intelligenceState.currentPhaseId === condition.requiredId
+            }
+            break
+        }
+      }
+
+      if (shouldDeliver) {
+        event.delivered = true
+        event.deliveredAt = now + event.delaySeconds * 1000
+        
+        const mail = getMailById(event.mailId)
+        if (mail) {
+          gameState.value.intelligenceState.mailNotifications.push(event.mailId)
+          
+          setTimeout(() => {
+            addLog('discovery', `📧 收到新邮件：${mail.subject}`)
+          }, event.delaySeconds * 1000)
+        }
+      }
+    }
+  }
+
+  function clearMailNotification(mailId: string) {
+    const index = gameState.value.intelligenceState.mailNotifications.indexOf(mailId)
+    if (index > -1) {
+      gameState.value.intelligenceState.mailNotifications.splice(index, 1)
+    }
+  }
+
+  function isSceneUnlocked(sceneId: string): boolean {
+    if (!currentCase.value) return false
+    
+    const progress = gameState.value.intelligenceState.sceneUnlockProgress[sceneId]
+    return progress !== undefined && progress >= 100
+  }
+
+  function getUnlockedScenes() {
+    if (!currentCase.value) return []
+    return currentCase.value.scenes.filter(s => isSceneUnlocked(s.id))
+  }
+
   function resetGame() {
     stopTimer()
     resetEvents()
@@ -1309,7 +1926,9 @@ export const useGameStore = defineStore('game', () => {
       },
       activeAnalyses: [],
       unlockedRecipes: [],
-      craftingHistory: []
+      craftingHistory: [],
+      intelligenceState: createInitialIntelligenceState(),
+      mailDeliveryEvents: []
     }
   }
 
@@ -1331,6 +1950,16 @@ export const useGameStore = defineStore('game', () => {
     activeHallucinations,
     activeMisleadingClues,
     activeFakeDeductions,
+    mailSystem,
+    currentPhase,
+    availableMails,
+    unreadMailCount,
+    availableDocuments,
+    unreadDocumentCount,
+    allPhases,
+    nextPhase,
+    overallProgress,
+    deductionInfoCompleteness,
     startCase,
     modifySanity,
     calculateHitRate,
@@ -1371,6 +2000,24 @@ export const useGameStore = defineStore('game', () => {
     addTimeBonus,
     getUsedTime,
     calculateScore,
+    getMailById,
+    getDocumentById,
+    getClueById,
+    readMail,
+    replyToMail,
+    readDocument,
+    canReadDocument,
+    unlockDocumentPage,
+    addIntelligence,
+    updateDeductionCompleteness,
+    checkPhaseProgression,
+    completeCurrentPhase,
+    startPhase,
+    setActivePhase,
+    checkMailDelivery,
+    clearMailNotification,
+    isSceneUnlocked,
+    getUnlockedScenes,
     resetGame
   }
 })
