@@ -5,6 +5,9 @@ import { commissions, getCommissionById, getRecommendedCommissions, setCommissio
 import { useProgressStore } from './progress'
 import { useSaveStore } from './save'
 import { useGameStore } from './game'
+import { useBestiaryStore } from './bestiary'
+import { useNewGamePlusStore } from './newGamePlus'
+import { getCaseById } from '@/data/cases'
 
 const STORAGE_KEY = 'cthulhu-commission-hall'
 
@@ -120,6 +123,7 @@ export const useCommissionHallStore = defineStore('commissionHall', () => {
     const reasons: string[] = []
     const progressStore = useProgressStore()
     const saveStore = useSaveStore()
+    const bestiaryStore = useBestiaryStore()
 
     if (activeCommissionId.value) {
       reasons.push('已有进行中的委托')
@@ -145,6 +149,17 @@ export const useCommissionHallStore = defineStore('commissionHall', () => {
       )
       if (missingTools.length > 0) {
         reasons.push(`缺少必要工具`)
+      }
+    }
+
+    if (commission.prerequisites?.unlockedBestiaryEntries) {
+      const missingEntries = commission.prerequisites.unlockedBestiaryEntries.filter(id => {
+        return !bestiaryStore.progress.discoveredCreatures.includes(id) &&
+               !bestiaryStore.progress.discoveredItems.includes(id) &&
+               !bestiaryStore.progress.discoveredOrganizations.includes(id)
+      })
+      if (missingEntries.length > 0) {
+        reasons.push(`需要先解锁指定图鉴条目（缺少 ${missingEntries.length} 个）`)
       }
     }
 
@@ -176,6 +191,33 @@ export const useCommissionHallStore = defineStore('commissionHall', () => {
     return true
   }
 
+  function applySpecialUnlocks(unlockIds: string[]) {
+    const bestiaryStore = useBestiaryStore()
+    const newGamePlusStore = useNewGamePlusStore()
+
+    unlockIds.forEach(unlockId => {
+      if (unlockId.startsWith('bestiary-entry-')) {
+        const entryId = unlockId.replace('bestiary-entry-', '')
+        const alreadyDiscovered =
+          bestiaryStore.progress.discoveredCreatures.includes(entryId) ||
+          bestiaryStore.progress.discoveredItems.includes(entryId) ||
+          bestiaryStore.progress.discoveredOrganizations.includes(entryId)
+        if (!alreadyDiscovered) {
+          bestiaryStore.discoverEntry(entryId, 'commission')
+        }
+      } else if (unlockId.startsWith('hidden-case-')) {
+        if (!newGamePlusStore.state.unlockedHiddenCases.includes(unlockId)) {
+          newGamePlusStore.state.unlockedHiddenCases.push(unlockId)
+          const caseData = getCaseById(unlockId)
+          if (caseData && caseData.status === 'locked') {
+            caseData.status = 'available'
+          }
+          newGamePlusStore.saveToStorage()
+        }
+      }
+    })
+  }
+
   function completeCommission(commissionId: string, success: boolean, sanityLost: number = 0) {
     const commission = getCommissionById(commissionId)
     if (!commission || commission.status !== 'in_progress') return null
@@ -193,6 +235,10 @@ export const useCommissionHallStore = defineStore('commissionHall', () => {
         commission.rewards.tools.forEach(toolId => {
           saveStore.unlockGlobalTool(toolId)
         })
+      }
+
+      if (commission.rewards.specialUnlocks && commission.rewards.specialUnlocks.length > 0) {
+        applySpecialUnlocks(commission.rewards.specialUnlocks)
       }
 
       const historyEntry: CommissionHistoryEntry = {

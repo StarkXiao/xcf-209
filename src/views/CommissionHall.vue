@@ -733,6 +733,12 @@ function resetFilters() {
                   {{ selectedCommission.prerequisites.requiredTools.map(id => getToolName(id)).join(', ') }}
                 </span>
               </div>
+              <div v-if="selectedCommission.prerequisites.unlockedBestiaryEntries" class="prereq-item">
+                <span class="prereq-label">图鉴条目:</span>
+                <span class="prereq-value">
+                  {{ selectedCommission.prerequisites.unlockedBestiaryEntries.length }} 个条目
+                </span>
+              </div>
             </div>
           </div>
 
