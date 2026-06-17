@@ -67,6 +67,12 @@ const routes: RouteRecordRaw[] = [
     name: 'CommissionHall',
     component: () => import('@/views/CommissionHall.vue'),
     meta: { title: '调查委托大厅' }
+  },
+  {
+    path: '/replay/:caseId?',
+    name: 'CaseReplay',
+    component: () => import('@/views/CaseReplay.vue'),
+    meta: { title: '案件回放编辑器' }
   }
 ]
 

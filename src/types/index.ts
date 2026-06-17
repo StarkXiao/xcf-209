@@ -1154,3 +1154,103 @@ export interface CommissionHallState {
   totalCommissionsCompleted: number
   totalReputationEarned: number
 }
+
+export type ReplayNodeType = 
+  | 'scene_visit'
+  | 'evidence_discovery'
+  | 'clue_discovery'
+  | 'clue_analysis'
+  | 'clue_connection'
+  | 'deduction_branch'
+  | 'conclusion'
+  | 'sanity_event'
+  | 'tool_use'
+  | 'phase_unlock'
+  | 'mail_read'
+  | 'document_read'
+  | 'key_moment'
+
+export interface ReplayNode {
+  id: string
+  type: ReplayNodeType
+  timestamp: number
+  relativeTime: number
+  title: string
+  description: string
+  details: Record<string, unknown>
+  isKeyMoment: boolean
+  tags: string[]
+  sanityChange?: number
+  evidenceId?: string
+  clueId?: string
+  sceneId?: string
+}
+
+export interface ReplayTimeline {
+  caseId: string
+  caseTitle: string
+  nodes: ReplayNode[]
+  startTime: number
+  endTime: number
+  totalDuration: number
+  sourceSaveId?: string
+  createdAt: number
+  metadata: {
+    endingId?: string
+    grade?: ScoreGrade
+    totalScore?: number
+    sanityLost?: number
+    playCount?: number
+  }
+}
+
+export interface ReplayFilter {
+  nodeTypes: ReplayNodeType[]
+  searchQuery: string
+  keyMomentsOnly: boolean
+  dateRange?: { start?: number; end?: number }
+}
+
+export interface ReplayPlaybackState {
+  isPlaying: boolean
+  currentNodeIndex: number
+  speed: 0.5 | 1 | 1.5 | 2
+  autoAdvance: boolean
+  intervalId: number | null
+}
+
+export interface ReplayEditorState {
+  activeTimeline: ReplayTimeline | null
+  availableTimelines: Record<string, ReplayTimeline[]>
+  selectedNodeId: string | null
+  filter: ReplayFilter
+  playback: ReplayPlaybackState
+  isEditing: boolean
+  highlightedNodeIds: string[]
+}
+
+export interface ReplayExportData {
+  version: string
+  exportedAt: number
+  timeline: ReplayTimeline
+  summary: {
+    totalNodes: number
+    keyMoments: number
+    evidenceFound: number
+    cluesAnalyzed: number
+    branchesUnlocked: number
+  }
+}
+
+export interface ReplayStats {
+  totalScenesVisited: number
+  totalEvidenceDiscovered: number
+  totalCluesDiscovered: number
+  totalCluesAnalyzed: number
+  totalConnections: number
+  totalSanityLost: number
+  totalSanityGained: number
+  keyMomentCount: number
+  phaseCount: number
+  toolsUsed: string[]
+}

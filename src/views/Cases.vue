@@ -211,6 +211,16 @@ function isNewGamePlusCase(caseId: string): boolean {
           🌿 {{ progressStore.totalBranches }} 分支
         </span>
       </div>
+
+      <div class="quick-actions">
+        <button 
+          v-if="progressStore.totalCompleted > 0"
+          class="quick-replay-btn"
+          @click="router.push('/replay')"
+        >
+          🎬 案件回放编辑器
+        </button>
+      </div>
     </div>
 
     <div class="chapters-section">
@@ -321,6 +331,9 @@ function isNewGamePlusCase(caseId: string): boolean {
             <div v-if="caseItem.status === 'completed'" class="case-actions">
               <button class="ngplus-btn" @click.stop="startNewGamePlus(caseItem)">
                 🔄 重新调查 (New Game+)
+              </button>
+              <button class="replay-btn" @click.stop="router.push(`/replay/${caseItem.id}`)">
+                🎬 案件回放
               </button>
               <div v-if="globalToolNames.length > 0" class="inherit-info">
                 <span class="inherit-label">继承工具:</span>
@@ -866,5 +879,59 @@ function isNewGamePlusCase(caseId: string): boolean {
 .inherit-info.ngplus-info {
   background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 140, 0, 0.1));
   border: 1px solid #ffd700;
+}
+
+.quick-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.quick-replay-btn {
+  padding: 0.75rem 2rem;
+  background: linear-gradient(135deg, rgba(107, 76, 154, 0.3), rgba(107, 76, 154, 0.15));
+  border: 2px solid var(--color-accent);
+  border-radius: 12px;
+  color: var(--color-accent-light);
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 0 rgba(107, 76, 154, 0);
+}
+
+.quick-replay-btn:hover {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-light));
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(107, 76, 154, 0.4);
+}
+
+.replay-btn {
+  width: 100%;
+  padding: 0.7rem;
+  font-size: 0.95rem;
+  background: linear-gradient(135deg, rgba(74, 144, 217, 0.2), rgba(107, 76, 154, 0.2));
+  color: var(--color-accent-light);
+  border: 1px solid rgba(107, 76, 154, 0.5);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  margin-top: 0.5rem;
+}
+
+.replay-btn:hover {
+  background: linear-gradient(135deg, rgba(74, 144, 217, 0.35), rgba(107, 76, 154, 0.35));
+  border-color: var(--color-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(107, 76, 154, 0.25);
+}
+
+.case-actions {
+  display: flex;
+  flex-direction: column;
 }
 </style>
