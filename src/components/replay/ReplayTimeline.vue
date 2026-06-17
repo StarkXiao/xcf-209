@@ -117,6 +117,12 @@ function getProgressPercent(node: ReplayNode): number {
                   {{ getNodeConfig(node).label }}
                 </span>
                 <span class="timestamp">{{ formatTime(node.relativeTime) }}</span>
+                <span v-if="node.details?.inferred" class="data-badge inferred" title="时间推断得出，非真实记录">
+                  ⚠️ 推断
+                </span>
+                <span v-else-if="node.sourceLogId" class="data-badge verified" title="来自真实操作日志">
+                  ✓ 真实
+                </span>
               </div>
               <div class="header-right" v-if="isEditing">
                 <button 
@@ -344,6 +350,26 @@ function getProgressPercent(node: ReplayNode): number {
   background: rgba(0, 0, 0, 0.3);
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
+}
+
+.data-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  letter-spacing: 0.2px;
+}
+
+.data-badge.inferred {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.data-badge.verified {
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
 }
 
 .header-right {

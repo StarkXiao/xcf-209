@@ -1184,6 +1184,22 @@ export interface ReplayNode {
   evidenceId?: string
   clueId?: string
   sceneId?: string
+  sourceLogId?: string
+  sourceLogType?: GameLogEntry['type']
+  rawEvent?: {
+    logEntry?: GameLogEntry
+    snapshot?: {
+      sanity?: number
+      maxSanity?: number
+      discoveredEvidence?: string[]
+      discoveredClues?: string[]
+      analyzedClues?: string[]
+      visitedScenes?: string[]
+      deductionBranches?: string[]
+      remainingTime?: number
+    }
+    context?: Record<string, unknown>
+  }
 }
 
 export interface ReplayTimeline {
@@ -1239,6 +1255,10 @@ export interface ReplayExportData {
     evidenceFound: number
     cluesAnalyzed: number
     branchesUnlocked: number
+    realLogNodes: number
+    inferredNodes: number
+    totalDuration: number
+    sanityLost: number
   }
 }
 

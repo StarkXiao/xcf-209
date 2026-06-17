@@ -201,6 +201,86 @@ function cancelEdits() {
         </div>
       </div>
 
+      <div v-if="node.rawEvent" class="detail-section">
+        <h4 class="section-title">
+          <span class="title-icon">🔬</span>
+          原始事件数据
+          <span v-if="node.sourceLogId" class="log-id-badge">
+            日志ID: {{ node.sourceLogId.slice(0, 16) }}...
+          </span>
+        </h4>
+
+        <div v-if="node.sourceLogType" class="source-tag">
+          <span class="source-label">来源类型:</span>
+          <span class="source-value">{{ node.sourceLogType }}</span>
+          <span v-if="node.details?.inferred" class="inferred-badge">⚠️ 推断数据</span>
+          <span v-else class="verified-badge">✓ 真实记录</span>
+        </div>
+
+        <div v-if="node.rawEvent.logEntry" class="log-entry-section">
+          <h5 class="subsection-title">📜 原始日志</h5>
+          <div class="log-entry-card">
+            <div class="log-entry-time">
+              {{ formatDateTime(node.rawEvent.logEntry.timestamp) }}
+            </div>
+            <div class="log-entry-type">
+              类型: <strong>{{ node.rawEvent.logEntry.type }}</strong>
+            </div>
+            <div class="log-entry-desc">
+              {{ node.rawEvent.logEntry.description }}
+            </div>
+            <div v-if="node.rawEvent.logEntry.details && Object.keys(node.rawEvent.logEntry.details).length > 0" class="log-entry-details">
+              <details>
+                <summary>详细参数</summary>
+                <pre class="details-json">{{ JSON.stringify(node.rawEvent.logEntry.details, null, 2) }}</pre>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="node.rawEvent.snapshot" class="snapshot-section">
+          <h5 class="subsection-title">📸 状态快照</h5>
+          <div class="snapshot-grid">
+            <div v-if="node.rawEvent.snapshot.sanity !== undefined" class="snapshot-item">
+              <span class="snap-key">🧠 理智值</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.sanity }}/{{ node.rawEvent.snapshot.maxSanity || '?' }}</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.remainingTime !== undefined" class="snapshot-item">
+              <span class="snap-key">⏱️ 剩余时间</span>
+              <span class="snap-value">{{ formatRelativeTime(node.rawEvent.snapshot.remainingTime) }}</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.discoveredEvidence" class="snapshot-item">
+              <span class="snap-key">🔍 已发现证据</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.discoveredEvidence.length }} 件</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.discoveredClues" class="snapshot-item">
+              <span class="snap-key">💡 已获得线索</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.discoveredClues.length }} 条</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.analyzedClues" class="snapshot-item">
+              <span class="snap-key">🧠 已分析线索</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.analyzedClues.length }} 条</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.visitedScenes" class="snapshot-item">
+              <span class="snap-key">📍 已访问场景</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.visitedScenes.length }} 个</span>
+            </div>
+            <div v-if="node.rawEvent.snapshot.deductionBranches" class="snapshot-item">
+              <span class="snap-key">🌿 推演分支</span>
+              <span class="snap-value">{{ node.rawEvent.snapshot.deductionBranches.length }} 个</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="node.rawEvent.context && Object.keys(node.rawEvent.context).length > 0" class="context-section">
+          <h5 class="subsection-title">🎯 事件上下文</h5>
+          <details class="context-details" open>
+            <summary>展开查看</summary>
+            <pre class="context-json">{{ JSON.stringify(node.rawEvent.context, null, 2) }}</pre>
+          </details>
+        </div>
+      </div>
+
       <div v-if="isEditing" class="edit-actions">
         <button class="btn btn-cancel" @click="cancelEdits">
           取消
@@ -585,12 +665,184 @@ function cancelEdits() {
   transform: translateY(-1px);
 }
 
+.section-title {
+  position: relative;
+}
+
+.log-id-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  margin-left: auto;
+  font-family: 'Courier New', monospace;
+}
+
+.source-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.source-label {
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+
+.source-value {
+  color: var(--color-accent-light);
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+}
+
+.inferred-badge {
+  margin-left: auto;
+  padding: 0.15rem 0.5rem;
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.verified-badge {
+  margin-left: auto;
+  padding: 0.15rem 0.5rem;
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.subsection-title {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  margin: 0 0 0.5rem 0;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  opacity: 0.85;
+}
+
+.log-entry-section,
+.snapshot-section,
+.context-section {
+  margin-bottom: 1rem;
+}
+
+.log-entry-card {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--color-accent);
+}
+
+.log-entry-time {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  margin-bottom: 0.35rem;
+  font-family: 'Courier New', monospace;
+}
+
+.log-entry-type {
+  font-size: 0.8rem;
+  color: var(--color-text);
+  margin-bottom: 0.5rem;
+}
+
+.log-entry-desc {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.6;
+  padding: 0.5rem;
+  background: rgba(107, 76, 154, 0.1);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.log-entry-details details,
+.context-details {
+  font-size: 0.75rem;
+}
+
+.log-entry-details summary,
+.context-details summary {
+  cursor: pointer;
+  color: var(--color-accent-light);
+  padding: 0.25rem 0;
+  user-select: none;
+}
+
+.log-entry-details summary:hover,
+.context-details summary:hover {
+  color: var(--color-accent);
+}
+
+.details-json,
+.context-json {
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.7rem;
+  color: var(--color-accent-light);
+  overflow-x: auto;
+  margin-top: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.4rem;
+}
+
+.snapshot-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.snap-key {
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+  opacity: 0.75;
+}
+
+.snap-value {
+  font-size: 0.85rem;
+  color: var(--color-accent-light);
+  font-weight: 700;
+}
+
 @media (max-width: 1024px) {
   .detail-content {
     padding: 1rem;
   }
   
   .time-info {
+    grid-template-columns: 1fr;
+  }
+  
+  .snapshot-grid {
     grid-template-columns: 1fr;
   }
 }
