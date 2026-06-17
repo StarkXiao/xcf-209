@@ -1,6 +1,7 @@
+import { reactive } from 'vue'
 import type { Case } from '@/types'
 
-export const cases: Case[] = [
+export const cases: Case[] = reactive([
   {
     id: 'case-001',
     title: '消失的灯塔守望者',
@@ -412,7 +413,7 @@ export const cases: Case[] = [
       ]
     }
   }
-]
+])
 
 export function getCaseById(id: string): Case | undefined {
   return cases.find(c => c.id === id)
@@ -434,4 +435,40 @@ export function getEvidenceById(caseId: string, evidenceId: string) {
     if (evidence) return evidence
   }
   return undefined
+}
+
+export function completeCase(caseId: string): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+  
+  caseData.status = 'completed'
+  return true
+}
+
+export function setCaseStatus(caseId: string, status: Case['status']): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+  
+  caseData.status = status
+  return true
+}
+
+export function resetCaseForReplay(caseId: string): boolean {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return false
+
+  caseData.scenes.forEach(scene => {
+    scene.searched = false
+    scene.evidence.forEach(e => {
+      e.discovered = false
+    })
+  })
+
+  caseData.clues.forEach(clue => {
+    clue.discovered = false
+    clue.analyzed = false
+  })
+
+  caseData.status = 'available'
+  return true
 }

@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
-import { getCaseById, unlockNextCase, getEvidenceById } from '@/data/cases'
+import { getCaseById, unlockNextCase, getEvidenceById, completeCase } from '@/data/cases'
 import { getToolById } from '@/data/tools'
 import type { ConclusionOption } from '@/types'
 
@@ -155,6 +155,7 @@ function makeDeduction() {
       branch: option.branch
     })
     
+    completeCase(caseData.value.id)
     unlockNextCase(caseData.value.id)
   }
 

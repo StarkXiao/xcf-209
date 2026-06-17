@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence } from '@/types'
-import { getCaseById } from '@/data/cases'
+import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 
@@ -93,6 +93,8 @@ export const useGameStore = defineStore('game', () => {
     if (bonusTools.length > 0) {
       addLog('discovery', `继承工具：${bonusTools.map(t => t.name).join('、')}`)
     }
+
+    setCaseStatus(caseId, 'in_progress')
     return true
   }
 

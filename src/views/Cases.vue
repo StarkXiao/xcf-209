@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { cases } from '@/data/cases'
+import { cases, resetCaseForReplay } from '@/data/cases'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
 import { getToolById } from '@/data/tools'
@@ -53,6 +53,8 @@ function selectCase(caseItem: typeof cases[0]) {
     
     gameStore.startCase(caseItem.id)
     router.push(`/investigation/${caseItem.id}`)
+  } else if (caseItem.status === 'completed') {
+    startNewGamePlus(caseItem)
   }
 }
 
@@ -62,14 +64,12 @@ function startNewGamePlus(caseItem: typeof cases[0]) {
       return
     }
   }
-  
+
+  resetCaseForReplay(caseItem.id)
+
   const inherited = saveStore.globalUnlockedTools
-  if (inherited.length === 0) {
-    gameStore.startCase(caseItem.id)
-  } else {
-    gameStore.startCase(caseItem.id, inherited)
-  }
-  
+  gameStore.startCase(caseItem.id, inherited.length > 0 ? inherited : undefined)
+
   gameStore.modifySanity(20, 'New Game+ 奖励')
   gameStore.addLog('discovery', 'New Game+：继承了全局解锁工具')
   

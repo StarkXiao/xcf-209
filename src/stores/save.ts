@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SaveData } from '@/types'
 import { useGameStore } from './game'
+import { setCaseStatus } from '@/data/cases'
 
 const STORAGE_KEY = 'cthulhu-game-saves'
 const GLOBAL_UNLOCKS_KEY = 'cthulhu-global-unlocks'
@@ -84,6 +85,10 @@ export const useSaveStore = defineStore('save', () => {
 
     const gameStore = useGameStore()
     gameStore.loadGameState(save.gameState)
+
+    if (save.gameState.currentCase) {
+      setCaseStatus(save.gameState.currentCase, 'in_progress')
+    }
     return true
   }
 
