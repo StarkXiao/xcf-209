@@ -13,6 +13,12 @@ const selectedClue = ref<Clue | null>(null)
 const connectingFrom = ref<string | null>(null)
 const showAnalysis = ref(false)
 const analysisResult = ref('')
+const analysisBonusInfo = ref<{
+  bonusClues: string[]
+  autoConnections: string[]
+  sanitySaved: number
+  extraInsight: string | null
+} | null>(null)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -112,9 +118,24 @@ function connectPotential(targetClueId: string) {
 function analyzeClue(clue: Clue) {
   showAnalysis.value = true
   analysisResult.value = clue.description
+  analysisBonusInfo.value = null
   
   if (!isClueAnalyzed(clue.id)) {
-    gameStore.analyzeClue(clue.id, clue.description)
+    const result = gameStore.analyzeClue(clue.id, clue.description)
+    if (result.success) {
+      analysisBonusInfo.value = {
+        bonusClues: result.bonusCluesDiscovered,
+        autoConnections: result.autoConnections.map(
+          c => c.clue1Id === clue.id ? c.clue2Id : c.clue1Id
+        ),
+        sanitySaved: result.sanitySaved,
+        extraInsight: result.extraInsight
+      }
+      
+      if (result.sanitySaved > 0) {
+        gameStore.modifySanity(result.sanitySaved, '高效分析节省理智')
+      }
+    }
   }
 }
 
@@ -299,6 +320,41 @@ function goToDeduction() {
             <div v-if="showAnalysis" class="analysis-panel card">
               <h3>分析结果</h3>
               <p class="analysis-text">{{ analysisResult }}</p>
+              
+              <div v-if="analysisBonusInfo" class="analysis-bonuses">
+                <div v-if="analysisBonusInfo.extraInsight" class="bonus-item insight">
+                  <span class="bonus-icon">💡</span>
+                  <span class="bonus-text">{{ analysisBonusInfo.extraInsight }}</span>
+                </div>
+                
+                <div v-if="analysisBonusInfo.sanitySaved > 0" class="bonus-item sanity">
+                  <span class="bonus-icon">🧠</span>
+                  <span class="bonus-text">高效分析节省了 {{ analysisBonusInfo.sanitySaved }} 点理智</span>
+                </div>
+                
+                <div v-if="analysisBonusInfo.bonusClues.length > 0" class="bonus-item clue">
+                  <span class="bonus-icon">🔍</span>
+                  <span class="bonus-text">
+                    额外发现线索：
+                    <span v-for="(clueId, idx) in analysisBonusInfo.bonusClues" :key="clueId">
+                      {{ getClueById(clueId)?.name || clueId }}
+                      <span v-if="idx < analysisBonusInfo.bonusClues.length - 1">、</span>
+                    </span>
+                  </span>
+                </div>
+                
+                <div v-if="analysisBonusInfo.autoConnections.length > 0" class="bonus-item connection">
+                  <span class="bonus-icon">🔗</span>
+                  <span class="bonus-text">
+                    自动建立关联：
+                    <span v-for="(connId, idx) in analysisBonusInfo.autoConnections" :key="connId">
+                      {{ getClueById(connId)?.name || connId }}
+                      <span v-if="idx < analysisBonusInfo.autoConnections.length - 1">、</span>
+                    </span>
+                  </span>
+                </div>
+              </div>
+              
               <button class="close-analysis" @click="showAnalysis = false">关闭</button>
             </div>
           </transition>
@@ -678,6 +734,67 @@ function goToDeduction() {
   border-radius: 4px;
   color: white;
   cursor: pointer;
+}
+
+.analysis-bonuses {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bonus-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(107, 76, 154, 0.15);
+  border-radius: 6px;
+  animation: bonusAppear 0.5s ease-out;
+}
+
+@keyframes bonusAppear {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bonus-item.insight {
+  background: rgba(255, 215, 0, 0.15);
+  border-left: 3px solid #ffd700;
+}
+
+.bonus-item.sanity {
+  background: rgba(58, 139, 90, 0.15);
+  border-left: 3px solid var(--color-success);
+}
+
+.bonus-item.clue {
+  background: rgba(107, 76, 154, 0.2);
+  border-left: 3px solid var(--color-accent);
+}
+
+.bonus-item.connection {
+  background: rgba(139, 107, 58, 0.15);
+  border-left: 3px solid var(--color-warning);
+}
+
+.bonus-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.bonus-text {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  line-height: 1.4;
 }
 
 .connections-panel {

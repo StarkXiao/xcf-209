@@ -310,17 +310,100 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
 
-  function analyzeClue(clueId: string, result: string) {
-    if (gameState.value.analyzedClues.includes(clueId)) return false
-
-    gameState.value.analyzedClues.push(clueId)
-    const analysisBonus = talentEffects.value.clueAnalysisSpeed
-    if (analysisBonus > 0) {
-      addLog('analysis', `分析线索：${clueId} - ${result}（分析效率 +${analysisBonus}%）`)
-    } else {
-      addLog('analysis', `分析线索：${clueId} - ${result}`)
+  function analyzeClue(clueId: string, result: string): { 
+    success: boolean
+    bonusCluesDiscovered: string[]
+    autoConnections: ClueConnection[]
+    sanitySaved: number
+    extraInsight: string | null
+  } {
+    if (gameState.value.analyzedClues.includes(clueId)) {
+      return { success: false, bonusCluesDiscovered: [], autoConnections: [], sanitySaved: 0, extraInsight: null }
     }
-    return true
+
+    const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
+    const activeProfile = characterStore.activeProfile
+    const wisdomBonus = activeProfile ? (activeProfile.stats.wisdom - 50) * 0.3 : 0
+    const totalAnalysisBonus = analysisSpeedBonus + wisdomBonus
+    
+    gameState.value.analyzedClues.push(clueId)
+    
+    const bonusCluesDiscovered: string[] = []
+    const autoConnections: ClueConnection[] = []
+    let sanitySaved = 0
+    let extraInsight: string | null = null
+    
+    if (totalAnalysisBonus >= 50) {
+      extraInsight = '深度分析：你注意到了常人容易忽略的细节。'
+    }
+    
+    if (totalAnalysisBonus >= 30) {
+      const sanityReduction = Math.min(5, Math.floor(totalAnalysisBonus / 15))
+      sanitySaved = sanityReduction
+    }
+    
+    if (totalAnalysisBonus >= 20) {
+      const discoveryChance = Math.min(60, totalAnalysisBonus * 1.5)
+      if (Math.random() * 100 < discoveryChance) {
+        const allClues = currentCase.value?.clues || []
+        const undiscoveredClues = allClues.filter(c => 
+          !gameState.value.discoveredClues.includes(c.id) && 
+          c.importance >= 3
+        )
+        if (undiscoveredClues.length > 0) {
+          const randomClue = undiscoveredClues[Math.floor(Math.random() * undiscoveredClues.length)]
+          discoverClue(randomClue.id)
+          bonusCluesDiscovered.push(randomClue.id)
+        }
+      }
+    }
+    
+    if (totalAnalysisBonus >= 40) {
+      const connectionChance = Math.min(50, (totalAnalysisBonus - 30) * 2.5)
+      if (Math.random() * 100 < connectionChance) {
+        const analyzedClue = currentCase.value?.clues.find(c => c.id === clueId)
+        if (analyzedClue && analyzedClue.connections.length > 0) {
+          for (const connId of analyzedClue.connections) {
+            if (gameState.value.discoveredClues.includes(connId)) {
+              const existingConnection = gameState.value.clueConnections.some(
+                c => (c.clue1Id === clueId && c.clue2Id === connId) ||
+                     (c.clue1Id === connId && c.clue2Id === clueId)
+              )
+              if (!existingConnection) {
+                const connection: ClueConnection = {
+                  clue1Id: clueId,
+                  clue2Id: connId,
+                  relationship: '分析推断',
+                  confirmed: false
+                }
+                gameState.value.clueConnections.push(connection)
+                autoConnections.push(connection)
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    let logMessage = `分析线索：${clueId} - ${result}`
+    if (totalAnalysisBonus > 0) {
+      logMessage += `（分析效率 +${totalAnalysisBonus.toFixed(0)}%）`
+    }
+    if (bonusCluesDiscovered.length > 0) {
+      logMessage += ` [额外发现线索]`
+    }
+    if (autoConnections.length > 0) {
+      logMessage += ` [自动建立关联]`
+    }
+    addLog('analysis', logMessage)
+    
+    return { 
+      success: true, 
+      bonusCluesDiscovered, 
+      autoConnections, 
+      sanitySaved,
+      extraInsight 
+    }
   }
 
   function addClueConnection(connection: ClueConnection) {
@@ -475,6 +558,10 @@ export const useGameStore = defineStore('game', () => {
 
   function loadGameState(state: GameState) {
     gameState.value = { ...state }
+    
+    if (state.characterProfileId) {
+      characterStore.setActiveProfile(state.characterProfileId)
+    }
   }
 
   function unlockDeductionBranch(branchId: string) {
