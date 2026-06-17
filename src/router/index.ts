@@ -61,6 +61,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Bestiary',
     component: () => import('@/views/Bestiary.vue'),
     meta: { title: '调查员图鉴' }
+  },
+  {
+    path: '/commission-hall',
+    name: 'CommissionHall',
+    component: () => import('@/views/CommissionHall.vue'),
+    meta: { title: '调查委托大厅' }
   }
 ]
 

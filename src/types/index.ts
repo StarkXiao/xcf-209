@@ -1075,3 +1075,82 @@ export interface NewGamePlusEnding {
   unlockRequirements: MilestoneRequirement[]
   isNgPlusExclusive: boolean
 }
+
+export type CommissionDifficulty = 'trivial' | 'easy' | 'normal' | 'hard' | 'nightmare'
+export type CommissionRisk = 'low' | 'medium' | 'high' | 'extreme'
+export type CommissionStatus = 'available' | 'in_progress' | 'completed' | 'failed' | 'expired'
+export type CommissionCategory = 'missing_person' | 'paranormal' | 'artifact' | 'ritual' | 'creature' | 'organization'
+
+export interface CommissionRewards {
+  sanityBonus: number
+  materials: { materialId: string; quantity: number }[]
+  tools?: string[]
+  reputation: number
+  specialUnlocks?: string[]
+}
+
+export interface CommissionPenalty {
+  sanityLoss: number
+  reputationLoss: number
+  description: string
+}
+
+export interface Commission {
+  id: string
+  title: string
+  client: string
+  clientAvatar?: string
+  description: string
+  fullDetails: string
+  category: CommissionCategory
+  difficulty: CommissionDifficulty
+  riskLevel: CommissionRisk
+  status: CommissionStatus
+  sanityCost: number
+  recommendedSanity: number
+  timeLimitMinutes: number
+  rewards: CommissionRewards
+  failurePenalty: CommissionPenalty
+  riskWarnings: string[]
+  prerequisites?: {
+    completedCases?: string[]
+    minReputation?: number
+    requiredTools?: string[]
+    unlockedBestiaryEntries?: string[]
+  }
+  relatedCaseId?: string
+  acceptedAt?: number
+  completedAt?: number
+  deadline?: number
+  tags: string[]
+  isRecommended?: boolean
+  recommendationReason?: string
+}
+
+export interface CommissionHistoryEntry {
+  commissionId: string
+  title: string
+  acceptedAt: number
+  completedAt?: number
+  result: 'completed' | 'failed' | 'abandoned'
+  sanityGained: number
+  sanityLost: number
+  reputationGained: number
+  materialsCollected: { materialId: string; quantity: number }[]
+  grade?: ScoreGrade
+  score?: number
+  notes?: string
+}
+
+export interface CommissionHallState {
+  availableCommissions: Commission[]
+  activeCommissions: Commission[]
+  completedCommissions: Commission[]
+  history: CommissionHistoryEntry[]
+  reputation: number
+  reputationRank: string
+  refreshCooldown: number
+  lastRefreshTime: number
+  totalCommissionsCompleted: number
+  totalReputationEarned: number
+}

@@ -48,6 +48,11 @@ const features = [
     icon: '📖',
     title: '调查员图鉴',
     description: '收录你在调查中遭遇的超自然生物、禁忌物品和神秘组织，追踪你的发现之旅。'
+  },
+  {
+    icon: '📜',
+    title: '委托大厅',
+    description: '接受来自各方的调查委托，获取声望、材料和特殊工具奖励，提升你的调查员等级。'
   }
 ]
 
@@ -69,6 +74,10 @@ function goToWorkshop() {
 
 function goToBestiary() {
   router.push('/bestiary')
+}
+
+function goToCommissionHall() {
+  router.push('/commission-hall')
 }
 </script>
 
@@ -116,6 +125,9 @@ function goToBestiary() {
           </button>
           <button class="secondary-button" @click="goToBestiary">
             调查员图鉴
+          </button>
+          <button class="secondary-button" @click="goToCommissionHall">
+            委托大厅
           </button>
         </div>
       </div>
