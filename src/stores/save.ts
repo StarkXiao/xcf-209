@@ -4,10 +4,12 @@ import type { SaveData } from '@/types'
 import { useGameStore } from './game'
 
 const STORAGE_KEY = 'cthulhu-game-saves'
+const GLOBAL_UNLOCKS_KEY = 'cthulhu-global-unlocks'
 
 export const useSaveStore = defineStore('save', () => {
   const saves = ref<SaveData[]>([])
   const maxSaves = 10
+  const globalUnlockedTools = ref<string[]>([])
 
   const saveCount = computed(() => saves.value.length)
   const hasSaves = computed(() => saves.value.length > 0)
@@ -22,6 +24,16 @@ export const useSaveStore = defineStore('save', () => {
       console.error('Failed to load saves:', error)
       saves.value = []
     }
+
+    try {
+      const unlockData = localStorage.getItem(GLOBAL_UNLOCKS_KEY)
+      if (unlockData) {
+        globalUnlockedTools.value = JSON.parse(unlockData)
+      }
+    } catch (error) {
+      console.error('Failed to load global unlocks:', error)
+      globalUnlockedTools.value = []
+    }
   }
 
   function saveSavesToStorage() {
@@ -29,6 +41,14 @@ export const useSaveStore = defineStore('save', () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saves.value))
     } catch (error) {
       console.error('Failed to save:', error)
+    }
+  }
+
+  function saveGlobalUnlocks() {
+    try {
+      localStorage.setItem(GLOBAL_UNLOCKS_KEY, JSON.stringify(globalUnlockedTools.value))
+    } catch (error) {
+      console.error('Failed to save global unlocks:', error)
     }
   }
 
@@ -97,6 +117,43 @@ export const useSaveStore = defineStore('save', () => {
     return saves.value.filter(s => s.caseId === caseId)
   }
 
+  function startNewGamePlus(caseId: string, sourceSaveId: string): boolean {
+    const sourceSave = getSaveById(sourceSaveId)
+    if (!sourceSave) return false
+
+    const gameStore = useGameStore()
+    
+    const inheritedToolIds = sourceSave.gameState.tools
+      .filter(t => t.tier >= 2 || t.durability > 50)
+      .map(t => t.id)
+    
+    const allToolIds = [...new Set([...inheritedToolIds, ...globalUnlockedTools.value])]
+
+    const success = gameStore.startCase(caseId, allToolIds)
+    if (success) {
+      gameStore.addLog('discovery', '新游戏+：继承了部分工具')
+      gameStore.modifySanity(20, '新游戏+奖励')
+    }
+    return success
+  }
+
+  function unlockGlobalTool(toolId: string): boolean {
+    if (globalUnlockedTools.value.includes(toolId)) return false
+    
+    globalUnlockedTools.value.push(toolId)
+    saveGlobalUnlocks()
+    return true
+  }
+
+  function getInheritedToolsFromSave(saveId: string): string[] {
+    const save = getSaveById(saveId)
+    if (!save) return []
+    
+    return save.gameState.tools
+      .filter(t => t.tier >= 2 || t.durability > 30)
+      .map(t => t.id)
+  }
+
   function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleString('zh-CN', {
       year: 'numeric',
@@ -129,12 +186,16 @@ export const useSaveStore = defineStore('save', () => {
     saveCount,
     hasSaves,
     maxSaves,
+    globalUnlockedTools,
     createSave,
     loadSave,
     deleteSave,
     updateSave,
     getSaveById,
     getSavesByCase,
+    startNewGamePlus,
+    unlockGlobalTool,
+    getInheritedToolsFromSave,
     formatDate,
     getPlayDuration
   }

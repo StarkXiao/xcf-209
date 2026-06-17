@@ -9,6 +9,7 @@ export interface Case {
   conclusion: Conclusion
   sanityCost: number
   recommendedSanity: number
+  startingTools?: string[]
 }
 
 export interface Scene {
@@ -33,6 +34,9 @@ export interface Evidence {
   location: { x: number; y: number }
   size: { width: number; height: number }
   requiredTool?: string
+  toolBoost?: string[]
+  baseHitRate: number
+  isSpecial?: boolean
   hiddenClues?: string[]
 }
 
@@ -47,6 +51,7 @@ export interface Clue {
   discovered: boolean
   analyzed: boolean
   analysisResult?: string
+  requiredToolForAnalysis?: string
 }
 
 export interface ClueConnection {
@@ -69,6 +74,52 @@ export interface ConclusionOption {
   isCorrect: boolean
   sanityCost: number
   feedback: string
+  requiredTools?: string[]
+  requiredEvidence?: string[]
+  branch?: string
+}
+
+export interface Tool {
+  id: string
+  name: string
+  description: string
+  icon: string
+  type: ToolType
+  uses: number
+  maxUses: number
+  durability: number
+  maxDurability: number
+  hitRateBonus: number
+  effectiveEvidenceTypes: Evidence['type'][]
+  tier: number
+  repairable: boolean
+  repairCost?: number
+}
+
+export type ToolType = 'magnifier' | 'fingerprint' | 'uv_light' | 'recorder' | 'analyzer' | 'picklock'
+
+export interface ToolInventory {
+  tools: Tool[]
+  selectedToolId: string | null
+}
+
+export interface HitRateResult {
+  baseRate: number
+  toolBonus: number
+  durabilityPenalty: number
+  sanityPenalty: number
+  finalRate: number
+  isGuaranteed: boolean
+  isImpossible: boolean
+}
+
+export interface SearchResult {
+  success: boolean
+  evidenceId: string
+  hitRate: number
+  toolUsed?: string
+  durabilityLost: number
+  message: string
 }
 
 export interface GameState {
@@ -83,12 +134,16 @@ export interface GameState {
   gameLog: GameLogEntry[]
   startTime: number
   lastSaveTime: number
+  tools: Tool[]
+  selectedToolId: string | null
+  failedSearches: string[]
+  deductionBranches: string[]
 }
 
 export interface GameLogEntry {
   id: string
   timestamp: number
-  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion'
+  type: 'discovery' | 'analysis' | 'connection' | 'sanity_loss' | 'conclusion' | 'tool_use' | 'tool_repair' | 'tool_break'
   description: string
   details?: Record<string, unknown>
 }
@@ -101,6 +156,8 @@ export interface SaveData {
   createdAt: number
   updatedAt: number
   screenshot?: string
+  isNewGamePlus?: boolean
+  inheritedTools?: string[]
 }
 
 export interface SanityEvent {
@@ -111,11 +168,11 @@ export interface SanityEvent {
   type: 'horror' | 'knowledge' | 'trauma' | 'revelation'
 }
 
-export interface Tool {
+export interface DeductionBranch {
   id: string
   name: string
   description: string
-  icon: string
-  uses: number
-  maxUses: number
+  requiredTools: string[]
+  requiredEvidence: string[]
+  unlocksOptions: string[]
 }

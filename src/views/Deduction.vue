@@ -3,7 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
-import { getCaseById, unlockNextCase } from '@/data/cases'
+import { getCaseById, unlockNextCase, getEvidenceById } from '@/data/cases'
+import { getToolById } from '@/data/tools'
 import type { ConclusionOption } from '@/types'
 
 const router = useRouter()
@@ -16,6 +17,7 @@ const showResult = ref(false)
 const resultMessage = ref('')
 const isCorrect = ref(false)
 const sanityLost = ref(0)
+const unlockedBranch = ref<string | null>(null)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -30,7 +32,15 @@ const hasEnoughEvidence = computed(() => {
 })
 
 const canDeduce = computed(() => {
-  return hasEnoughEvidence.value && gameStore.gameState.sanity >= caseData.value?.conclusion.sanityThreshold!
+  if (!selectedConclusion.value || !caseData.value) return false
+  const option = caseData.value.conclusion.options.find(o => o.id === selectedConclusion.value)
+  if (!option) return false
+  
+  if (!hasEnoughEvidence.value) return false
+  if (gameStore.gameState.sanity < caseData.value.conclusion.sanityThreshold) return false
+  if (!isOptionAvailable(option)) return false
+  
+  return true
 })
 
 const evidenceProgress = computed(() => {
@@ -45,8 +55,61 @@ const missingEvidence = computed(() => {
   if (!caseData.value) return []
   const requiredEvidence = caseData.value.conclusion.evidence
   const discovered = gameStore.gameState.discoveredEvidence
-  return requiredEvidence.filter(e => !discovered.includes(e))
+  return requiredEvidence
+    .filter(e => !discovered.includes(e))
+    .map(evId => {
+      const ev = getEvidenceById(caseData.value!.id, evId)
+      return ev?.name || evId
+    })
 })
+
+
+
+function isOptionAvailable(option: ConclusionOption): boolean {
+  if (option.requiredTools && option.requiredTools.length > 0) {
+    const hasAllTools = option.requiredTools.every(toolId => 
+      gameStore.gameState.tools.some(t => t.id === toolId && t.uses > 0 && t.durability > 0)
+    )
+    if (!hasAllTools) return false
+  }
+
+  if (option.requiredEvidence && option.requiredEvidence.length > 0) {
+    const hasAllEvidence = option.requiredEvidence.every(
+      evId => gameStore.gameState.discoveredEvidence.includes(evId)
+    )
+    if (!hasAllEvidence) return false
+  }
+
+  return true
+}
+
+function getMissingRequirements(option: ConclusionOption): { tools: string[], evidence: string[] } {
+  const missingTools: string[] = []
+  const missingEvidenceList: string[] = []
+
+  if (option.requiredTools) {
+    option.requiredTools.forEach(toolId => {
+      const hasTool = gameStore.gameState.tools.some(
+        t => t.id === toolId && t.uses > 0 && t.durability > 0
+      )
+      if (!hasTool) {
+        const tool = getToolById(toolId)
+        missingTools.push(tool?.name || toolId)
+      }
+    })
+  }
+
+  if (option.requiredEvidence && caseData.value) {
+    option.requiredEvidence.forEach(evId => {
+      if (!gameStore.gameState.discoveredEvidence.includes(evId)) {
+        const ev = getEvidenceById(caseData.value!.id, evId)
+        missingEvidenceList.push(ev?.name || evId)
+      }
+    })
+  }
+
+  return { tools: missingTools, evidence: missingEvidenceList }
+}
 
 onMounted(() => {
   if (!caseData.value) {
@@ -55,6 +118,7 @@ onMounted(() => {
 })
 
 function selectOption(option: ConclusionOption) {
+  if (!isOptionAvailable(option)) return
   selectedConclusion.value = option.id
 }
 
@@ -68,6 +132,11 @@ function makeDeduction() {
   resultMessage.value = option.feedback
   sanityLost.value = option.sanityCost
   
+  if (option.branch) {
+    unlockedBranch.value = option.branch
+    gameStore.unlockDeductionBranch(option.branch)
+  }
+  
   if (option.sanityCost > 0) {
     gameStore.modifySanity(-option.sanityCost, '真相推演')
   }
@@ -77,10 +146,16 @@ function makeDeduction() {
   if (option.isCorrect) {
     gameStore.addLog('conclusion', `案件已结案：${caseData.value.title}`, {
       conclusion: option.text,
-      sanityLost: option.sanityCost
+      sanityLost: option.sanityCost,
+      branch: option.branch
     })
     
     unlockNextCase(caseData.value.id)
+
+    if (option.branch === 'deep-truth') {
+      saveStore.unlockGlobalTool('tool-magnifier-pro')
+      saveStore.unlockGlobalTool('tool-uv-light-advanced')
+    }
   }
 }
 
@@ -105,6 +180,20 @@ function saveProgress() {
   if (saveStore.createSave(saveName)) {
     alert('存档成功！')
   }
+}
+
+function getBranchInfo(branch: string): { name: string; description: string } {
+  const branches: Record<string, { name: string; description: string }> = {
+    'standard': {
+      name: '标准结局',
+      description: '基于常规调查得出的结论'
+    },
+    'deep-truth': {
+      name: '深渊真相',
+      description: '使用特殊工具发现隐藏证据，揭示更深层的真相'
+    }
+  }
+  return branches[branch] || { name: branch, description: '' }
 }
 </script>
 
@@ -171,6 +260,41 @@ function saveProgress() {
               ⚠️ 理智值不足，推演可能失败
             </div>
           </div>
+
+          <div class="tools-check">
+            <h4>可用工具</h4>
+            <div class="tools-list">
+              <div 
+                v-for="tool in gameStore.gameState.tools" 
+                :key="tool.id"
+                class="tool-item"
+                :class="{ disabled: tool.uses <= 0 || tool.durability <= 0 }"
+              >
+                <span class="tool-icon">{{ tool.icon }}</span>
+                <span class="tool-name">{{ tool.name }}</span>
+                <span class="tool-status">
+                  {{ tool.uses > 0 && tool.durability > 0 ? '可用' : '已耗尽' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="gameStore.gameState.deductionBranches.length > 0" class="branches-section">
+            <h4>已解锁分支</h4>
+            <div class="branches-list">
+              <div 
+                v-for="branchId in gameStore.gameState.deductionBranches" 
+                :key="branchId"
+                class="branch-item"
+              >
+                <span class="branch-icon">🌿</span>
+                <div class="branch-info">
+                  <span class="branch-name">{{ getBranchInfo(branchId).name }}</span>
+                  <span class="branch-desc">{{ getBranchInfo(branchId).description }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="conclusion-panel card">
@@ -188,16 +312,32 @@ function saveProgress() {
               class="option-item"
               :class="{ 
                 selected: selectedConclusion === option.id,
-                disabled: !canDeduce
+                disabled: !isOptionAvailable(option),
+                'branch-option': option.branch
               }"
-              @click="canDeduce && selectOption(option)"
+              @click="selectOption(option)"
             >
               <div class="option-header">
                 <span class="option-number">{{ caseData.conclusion.options.indexOf(option) + 1 }}</span>
-                <span class="option-text">{{ option.text }}</span>
+                <div class="option-text-wrapper">
+                  <span class="option-text">{{ option.text }}</span>
+                  <span v-if="option.branch" class="branch-tag">
+                    {{ getBranchInfo(option.branch).name }}
+                  </span>
+                </div>
               </div>
               <div class="option-meta">
                 <span class="sanity-cost">理智消耗: {{ option.sanityCost }}</span>
+              </div>
+
+              <div v-if="!isOptionAvailable(option)" class="locked-reason">
+                <p class="locked-title">🔒 需要满足以下条件:</p>
+                <ul v-if="getMissingRequirements(option).tools.length > 0">
+                  <li>工具: {{ getMissingRequirements(option).tools.join('、') }}</li>
+                </ul>
+                <ul v-if="getMissingRequirements(option).evidence.length > 0">
+                  <li>特殊证据: {{ getMissingRequirements(option).evidence.join('、') }}</li>
+                </ul>
               </div>
             </div>
           </div>
@@ -205,13 +345,15 @@ function saveProgress() {
           <div class="deduction-actions">
             <button 
               class="deduce-btn primary"
-              :disabled="!selectedConclusion || !canDeduce"
+              :disabled="!canDeduce"
               @click="makeDeduction"
             >
               🔍 提交推演
             </button>
             <p v-if="!canDeduce" class="cannot-deduce">
-              {{ !hasEnoughEvidence ? '证据不足，无法推演' : '理智值过低，推演风险极大' }}
+              {{ !hasEnoughEvidence ? '证据不足，无法推演' : 
+                 selectedConclusion ? '条件不足，无法选择此结论' : 
+                 '请选择一个推演结论' }}
             </p>
           </div>
         </div>
@@ -237,12 +379,20 @@ function saveProgress() {
               <span class="stat-value">{{ gameStore.gameState.clueConnections.length }}</span>
             </div>
             <div class="stat-item">
+              <span class="stat-label">携带工具</span>
+              <span class="stat-value">{{ gameStore.gameState.tools.length }}</span>
+            </div>
+            <div class="stat-item">
               <span class="stat-label">当前理智</span>
               <span class="stat-value sanity">{{ gameStore.gameState.sanity }}</span>
             </div>
             <div class="stat-item">
               <span class="stat-label">调查时长</span>
               <span class="stat-value">{{ saveStore.getPlayDuration(gameStore.gameState.startTime) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">推演分支</span>
+              <span class="stat-value">{{ gameStore.gameState.deductionBranches.length }}</span>
             </div>
           </div>
 
@@ -273,6 +423,11 @@ function saveProgress() {
               {{ isCorrect ? '推演正确！' : '推演失败...' }}
             </h2>
             <p class="result-message">{{ resultMessage }}</p>
+
+            <div v-if="unlockedBranch" class="branch-unlock">
+              <span class="branch-icon">🌿</span>
+              <span>解锁推演分支：{{ getBranchInfo(unlockedBranch).name }}</span>
+            </div>
             
             <div v-if="sanityLost > 0" class="result-sanity">
               <span>理智消耗: -{{ sanityLost }}</span>
@@ -436,6 +591,7 @@ function saveProgress() {
 .sanity-check {
   padding-top: 1rem;
   border-top: 1px solid var(--color-border);
+  margin-bottom: 1rem;
 }
 
 .sanity-check h4 {
@@ -464,6 +620,104 @@ function saveProgress() {
   border-radius: 4px;
   color: var(--color-danger);
   font-size: 0.85rem;
+}
+
+.tools-check {
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  margin-bottom: 1rem;
+}
+
+.tools-check h4 {
+  color: var(--color-text);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.tool-item.disabled {
+  opacity: 0.4;
+}
+
+.tool-icon {
+  font-size: 1.1rem;
+}
+
+.tool-name {
+  flex: 1;
+  color: var(--color-text);
+}
+
+.tool-status {
+  font-size: 0.75rem;
+  color: var(--color-success);
+}
+
+.tool-item.disabled .tool-status {
+  color: var(--color-danger);
+}
+
+.branches-section {
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.branches-section h4 {
+  color: var(--color-text);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.branches-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.branch-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(107, 76, 154, 0.15);
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+}
+
+.branch-icon {
+  font-size: 1.1rem;
+}
+
+.branch-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.branch-name {
+  font-size: 0.85rem;
+  color: var(--color-accent-light);
+  font-weight: bold;
+}
+
+.branch-desc {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
 }
 
 .conclusion-panel {
@@ -515,6 +769,10 @@ function saveProgress() {
   box-shadow: 0 0 10px rgba(107, 76, 154, 0.3);
 }
 
+.option-item.branch-option {
+  border-left: 4px solid #ffd700;
+}
+
 .option-item.disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -538,11 +796,30 @@ function saveProgress() {
   color: white;
   font-size: 0.85rem;
   font-weight: bold;
+  flex-shrink: 0;
+}
+
+.option-text-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .option-text {
   color: var(--color-text);
   line-height: 1.5;
+}
+
+.branch-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  width: fit-content;
 }
 
 .option-meta {
@@ -554,6 +831,30 @@ function saveProgress() {
 
 .sanity-cost {
   color: var(--color-warning);
+}
+
+.locked-reason {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.locked-title {
+  font-size: 0.8rem;
+  color: var(--color-warning);
+  margin-bottom: 0.5rem;
+}
+
+.locked-reason ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.locked-reason li {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  padding: 0.15rem 0;
 }
 
 .deduction-actions {
@@ -718,6 +1019,20 @@ function saveProgress() {
   margin-bottom: 1.5rem;
 }
 
+.branch-unlock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid #ffd700;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  color: #ffd700;
+  font-size: 0.9rem;
+}
+
 .result-sanity {
   display: flex;
   justify-content: center;
@@ -745,6 +1060,16 @@ function saveProgress() {
 .close-btn {
   padding: 0.75rem 2rem;
   font-size: 1rem;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 @media (max-width: 1024px) {

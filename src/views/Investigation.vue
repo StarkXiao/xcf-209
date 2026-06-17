@@ -3,7 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
-import type { Scene, Evidence } from '@/types'
+import { getToolById } from '@/data/tools'
+import type { Scene, Evidence, HitRateResult } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -12,6 +13,10 @@ const gameStore = useGameStore()
 const currentScene = ref<Scene | null>(null)
 const selectedEvidence = ref<Evidence | null>(null)
 const showEvidenceDetail = ref(false)
+const showToolPanel = ref(false)
+const hoveredEvidence = ref<Evidence | null>(null)
+const searchResultMessage = ref('')
+const showSearchResult = ref(false)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -23,6 +28,14 @@ const sceneBackgrounds: Record<string, string> = {
   cottage: 'linear-gradient(180deg, #2d132c 0%, #1a1a2e 50%, #0a0a0f 100%)',
   shore: 'linear-gradient(180deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%)'
 }
+
+const tools = computed(() => gameStore.gameState.tools)
+const selectedTool = computed(() => gameStore.selectedTool)
+
+const hoveredHitRate = computed<HitRateResult | null>(() => {
+  if (!hoveredEvidence.value) return null
+  return gameStore.calculateHitRate(hoveredEvidence.value)
+})
 
 onMounted(() => {
   if (!caseData.value) {
@@ -59,25 +72,67 @@ function isEvidenceDiscovered(evidenceId: string) {
   return gameStore.gameState.discoveredEvidence.includes(evidenceId)
 }
 
+function isEvidenceDiscoverable(evidence: Evidence): boolean {
+  return gameStore.canDiscoverEvidence(evidence)
+}
+
+function hoverEvidence(evidence: Evidence) {
+  hoveredEvidence.value = evidence
+}
+
+function leaveEvidence() {
+  hoveredEvidence.value = null
+}
+
 function clickEvidence(evidence: Evidence) {
   if (isEvidenceDiscovered(evidence.id)) {
     selectedEvidence.value = evidence
     showEvidenceDetail.value = true
     return
   }
+
+  if (!isEvidenceDiscoverable(evidence)) {
+    searchResultMessage.value = `需要特定工具才能发现这个证据`
+    showSearchResult.value = true
+    setTimeout(() => { showSearchResult.value = false }, 2000)
+    return
+  }
   
-  const result = gameStore.discoverEvidence(evidence.id, evidence.sanityEffect)
+  const result = gameStore.searchEvidence(evidence)
   
-  if (result) {
+  searchResultMessage.value = result.message
+  showSearchResult.value = true
+  
+  setTimeout(() => {
+    showSearchResult.value = false
+  }, 2000)
+  
+  if (result.success) {
     selectedEvidence.value = evidence
     showEvidenceDetail.value = true
-    
-    if (evidence.hiddenClues) {
-      evidence.hiddenClues.forEach(clueId => {
-        gameStore.discoverClue(clueId)
-      })
-    }
   }
+}
+
+function selectTool(toolId: string) {
+  gameStore.selectTool(toolId)
+  showToolPanel.value = false
+}
+
+function repairTool(toolId: string) {
+  gameStore.repairTool(toolId)
+}
+
+function getDurabilityColor(durability: number, maxDurability: number): string {
+  const ratio = durability / maxDurability
+  if (ratio >= 0.6) return '#4caf50'
+  if (ratio >= 0.3) return '#ff9800'
+  return '#f44336'
+}
+
+function getHitRateColor(hitRate: number): string {
+  if (hitRate >= 70) return '#4caf50'
+  if (hitRate >= 40) return '#ff9800'
+  return '#f44336'
 }
 
 function closeEvidenceDetail() {
@@ -105,6 +160,20 @@ function getTotalProgress(): number {
   const discovered = gameStore.gameState.discoveredEvidence.length
   return Math.round((discovered / totalEvidence) * 100)
 }
+
+function getSpecialEvidenceCount(): number {
+  if (!caseData.value) return 0
+  return caseData.value.scenes.reduce((sum, s) => {
+    return sum + s.evidence.filter(e => e.isSpecial).length
+  }, 0)
+}
+
+function getDiscoveredSpecialCount(): number {
+  if (!caseData.value) return 0
+  return caseData.value.scenes.reduce((sum, s) => {
+    return sum + s.evidence.filter(e => e.isSpecial && gameStore.gameState.discoveredEvidence.includes(e.id)).length
+  }, 0)
+}
 </script>
 
 <template>
@@ -126,6 +195,10 @@ function getTotalProgress(): number {
           </div>
           <div class="progress-bar">
             <div class="progress-fill" :style="{ width: `${getTotalProgress()}%` }"></div>
+          </div>
+          <div class="special-evidence-info">
+            <span class="special-label">特殊证据</span>
+            <span class="special-value">{{ getDiscoveredSpecialCount() }}/{{ getSpecialEvidenceCount() }}</span>
           </div>
         </div>
       </div>
@@ -153,6 +226,64 @@ function getTotalProgress(): number {
               </div>
             </div>
           </div>
+
+          <div class="tools-section">
+            <h3 class="panel-title">调查工具</h3>
+            <div 
+              v-if="selectedTool" 
+              class="current-tool"
+              @click="showToolPanel = !showToolPanel"
+            >
+              <span class="tool-icon">{{ selectedTool.icon }}</span>
+              <div class="tool-info">
+                <div class="tool-name">{{ selectedTool.name }}</div>
+                <div class="tool-durability">
+                  <div class="durability-bar">
+                    <div 
+                      class="durability-fill"
+                      :style="{ 
+                        width: `${(selectedTool.durability / selectedTool.maxDurability) * 100}%`,
+                        backgroundColor: getDurabilityColor(selectedTool.durability, selectedTool.maxDurability)
+                      }"
+                    ></div>
+                  </div>
+                  <span class="durability-text">{{ selectedTool.durability }}%</span>
+                </div>
+              </div>
+              <span class="tool-arrow">▼</span>
+            </div>
+
+            <transition name="slide">
+              <div v-if="showToolPanel" class="tool-dropdown">
+                <div
+                  v-for="tool in tools"
+                  :key="tool.id"
+                  class="tool-option"
+                  :class="{ 
+                    selected: selectedTool?.id === tool.id,
+                    disabled: tool.uses <= 0 || tool.durability <= 0
+                  }"
+                  @click="tool.uses > 0 && tool.durability > 0 && selectTool(tool.id)"
+                >
+                  <span class="tool-icon">{{ tool.icon }}</span>
+                  <div class="tool-details">
+                    <div class="tool-name">{{ tool.name }}</div>
+                    <div class="tool-stats">
+                      <span>使用次数: {{ tool.uses }}/{{ tool.maxUses }}</span>
+                      <span>耐久: {{ tool.durability }}%</span>
+                    </div>
+                  </div>
+                  <button 
+                    v-if="tool.durability < tool.maxDurability && tool.repairable"
+                    class="repair-btn"
+                    @click.stop="repairTool(tool.id)"
+                  >
+                    🔧 修复
+                  </button>
+                </div>
+              </div>
+            </transition>
+          </div>
         </div>
 
         <div class="scene-viewer">
@@ -170,22 +301,69 @@ function getTotalProgress(): number {
                   class="evidence-marker"
                   :class="{ 
                     discovered: isEvidenceDiscovered(evidence.id),
-                    selected: selectedEvidence?.id === evidence.id
+                    selected: selectedEvidence?.id === evidence.id,
+                    special: evidence.isSpecial && !isEvidenceDiscovered(evidence.id),
+                    undiscoverable: !isEvidenceDiscoverable(evidence) && !isEvidenceDiscovered(evidence.id)
                   }"
                   :style="getEvidencePosition(evidence)"
                   @click="clickEvidence(evidence)"
+                  @mouseenter="hoverEvidence(evidence)"
+                  @mouseleave="leaveEvidence()"
                 >
                   <div class="marker-content">
-                    <span v-if="!isEvidenceDiscovered(evidence.id)" class="marker-icon">?</span>
+                    <span v-if="!isEvidenceDiscovered(evidence.id)" class="marker-icon">
+                      {{ evidence.isSpecial ? '★' : '?' }}
+                    </span>
                     <span v-else class="marker-icon found">✓</span>
                   </div>
                   <div class="marker-glow"></div>
+                  
+                  <transition name="fade">
+                    <div 
+                      v-if="hoveredEvidence?.id === evidence.id && !isEvidenceDiscovered(evidence.id)" 
+                      class="evidence-tooltip"
+                    >
+                      <div class="tooltip-name">
+                        {{ evidence.isSpecial ? '★ 特殊证据' : '未知证据' }}
+                      </div>
+                      <div v-if="hoveredHitRate" class="tooltip-hitrate">
+                        <span>成功率:</span>
+                        <span 
+                          class="hitrate-value"
+                          :style="{ color: getHitRateColor(hoveredHitRate.finalRate) }"
+                        >
+                          {{ hoveredHitRate.finalRate }}%
+                        </span>
+                      </div>
+                      <div v-if="evidence.requiredTool" class="tooltip-required">
+                        需要特定工具
+                      </div>
+                      <div class="tooltip-details">
+                        <div>基础: {{ hoveredHitRate?.baseRate }}%</div>
+                        <div v-if="hoveredHitRate?.toolBonus" class="bonus">
+                          工具加成: +{{ hoveredHitRate?.toolBonus }}%
+                        </div>
+                        <div v-if="hoveredHitRate?.durabilityPenalty" class="penalty">
+                          耐久惩罚: -{{ hoveredHitRate?.durabilityPenalty }}%
+                        </div>
+                        <div v-if="hoveredHitRate?.sanityPenalty" class="penalty">
+                          理智惩罚: -{{ hoveredHitRate?.sanityPenalty }}%
+                        </div>
+                      </div>
+                    </div>
+                  </transition>
                 </div>
               </div>
 
+              <transition name="fade">
+                <div v-if="showSearchResult" class="search-result-toast">
+                  {{ searchResultMessage }}
+                </div>
+              </transition>
+
               <div class="scene-hint">
                 <span class="hint-icon">🔍</span>
-                <span>点击问号标记搜查证据</span>
+                <span>点击标记搜查证据，选择合适的工具提高成功率</span>
               </div>
             </div>
           </div>
@@ -208,6 +386,20 @@ function getTotalProgress(): number {
               <span class="action-text">返回案件</span>
             </button>
           </div>
+
+          <div class="sanity-panel">
+            <h4 class="panel-subtitle">理智状态</h4>
+            <div class="sanity-bar-container">
+              <div class="sanity-bar">
+                <div 
+                  class="sanity-fill"
+                  :class="{ low: gameStore.isLowSanity, critical: gameStore.isCriticalSanity }"
+                  :style="{ width: `${gameStore.sanityPercentage}%` }"
+                ></div>
+              </div>
+              <span class="sanity-value">{{ gameStore.gameState.sanity }}/{{ gameStore.gameState.maxSanity }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -216,7 +408,10 @@ function getTotalProgress(): number {
           <div class="evidence-detail card">
             <div class="evidence-header">
               <h3 class="evidence-name">{{ selectedEvidence.name }}</h3>
-              <div class="evidence-type">{{ selectedEvidence.type }}</div>
+              <div class="evidence-type">
+                {{ selectedEvidence.type }}
+                <span v-if="selectedEvidence.isSpecial" class="special-badge">★ 特殊</span>
+              </div>
             </div>
             
             <div class="evidence-content">
@@ -226,6 +421,13 @@ function getTotalProgress(): number {
                 <span class="effect-label">理智影响:</span>
                 <span class="effect-value" :class="{ negative: selectedEvidence.sanityEffect < 0 }">
                   {{ selectedEvidence.sanityEffect > 0 ? '+' : '' }}{{ selectedEvidence.sanityEffect }}
+                </span>
+              </div>
+
+              <div v-if="selectedEvidence.requiredTool" class="tool-info">
+                <span class="effect-label">需要工具:</span>
+                <span class="effect-value">
+                  {{ getToolById(selectedEvidence.requiredTool)?.name || selectedEvidence.requiredTool }}
                 </span>
               </div>
             </div>
@@ -311,10 +513,26 @@ function getTotalProgress(): number {
   transition: width 0.3s ease;
 }
 
+.special-evidence-info {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.special-label {
+  color: var(--color-text-dim);
+}
+
+.special-value {
+  color: #ffd700;
+  font-weight: bold;
+}
+
 .investigation-content {
   flex: 1;
   display: grid;
-  grid-template-columns: 250px 1fr 200px;
+  grid-template-columns: 280px 1fr 220px;
   gap: 1.5rem;
   min-height: 0;
 }
@@ -337,12 +555,17 @@ function getTotalProgress(): number {
   border-bottom: 1px solid var(--color-border);
 }
 
+.panel-subtitle {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  margin-bottom: 0.75rem;
+}
+
 .scenes-list {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  overflow-y: auto;
+  margin-bottom: 1.5rem;
 }
 
 .scene-item {
@@ -395,6 +618,134 @@ function getTotalProgress(): number {
   color: var(--color-text-dim);
 }
 
+.tools-section {
+  margin-top: auto;
+}
+
+.current-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.current-tool:hover {
+  background: rgba(107, 76, 154, 0.2);
+}
+
+.tool-icon {
+  font-size: 1.5rem;
+}
+
+.tool-info {
+  flex: 1;
+}
+
+.tool-name {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  margin-bottom: 0.25rem;
+}
+
+.tool-durability {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.durability-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.durability-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.durability-text {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  min-width: 35px;
+  text-align: right;
+}
+
+.tool-arrow {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+}
+
+.tool-dropdown {
+  margin-top: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tool-option:last-child {
+  border-bottom: none;
+}
+
+.tool-option:hover:not(.disabled) {
+  background: rgba(107, 76, 154, 0.15);
+}
+
+.tool-option.selected {
+  background: rgba(107, 76, 154, 0.25);
+  border-left: 3px solid var(--color-accent);
+}
+
+.tool-option.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tool-details {
+  flex: 1;
+}
+
+.tool-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+
+.repair-btn {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  background: var(--color-success);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.repair-btn:hover {
+  background: #3d8b5a;
+}
+
 .scene-viewer {
   display: flex;
   flex-direction: column;
@@ -427,6 +778,7 @@ function getTotalProgress(): number {
   font-size: 0.95rem;
   line-height: 1.6;
   backdrop-filter: blur(5px);
+  z-index: 10;
 }
 
 .evidence-layer {
@@ -472,6 +824,17 @@ function getTotalProgress(): number {
   border-color: #4caf50;
 }
 
+.evidence-marker.special .marker-content {
+  background: rgba(255, 215, 0, 0.8);
+  border-color: #ffd700;
+  color: #1a1a2e;
+}
+
+.evidence-marker.undiscoverable .marker-content {
+  background: rgba(100, 100, 100, 0.5);
+  border-color: #666;
+}
+
 .evidence-marker.selected .marker-content {
   transform: scale(1.3);
   box-shadow: 0 0 20px var(--color-accent);
@@ -491,9 +854,88 @@ function getTotalProgress(): number {
   animation: pulse 2s infinite;
 }
 
+.evidence-marker.special .marker-glow {
+  background: radial-gradient(circle, #ffd700 0%, transparent 70%);
+}
+
 @keyframes pulse {
   0%, 100% { transform: scale(1); opacity: 0.3; }
   50% { transform: scale(1.2); opacity: 0.5; }
+}
+
+.evidence-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 10px;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.95);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  min-width: 180px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.tooltip-name {
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: var(--color-accent-light);
+  margin-bottom: 0.5rem;
+}
+
+.tooltip-hitrate {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.hitrate-value {
+  font-weight: bold;
+}
+
+.tooltip-required {
+  font-size: 0.8rem;
+  color: #ffd700;
+  margin-bottom: 0.5rem;
+}
+
+.tooltip-details {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.5rem;
+}
+
+.tooltip-details div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.tooltip-details .bonus {
+  color: var(--color-success);
+}
+
+.tooltip-details .penalty {
+  color: var(--color-danger);
+}
+
+.search-result-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1rem 2rem;
+  background: rgba(0, 0, 0, 0.9);
+  border: 2px solid var(--color-accent);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 1.1rem;
+  z-index: 100;
+  pointer-events: none;
 }
 
 .scene-hint {
@@ -519,6 +961,7 @@ function getTotalProgress(): number {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  margin-bottom: 1.5rem;
 }
 
 .action-btn {
@@ -556,6 +999,52 @@ function getTotalProgress(): number {
   border-radius: 10px;
   font-size: 0.75rem;
   min-width: 24px;
+  text-align: center;
+}
+
+.sanity-panel {
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.sanity-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sanity-bar {
+  height: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.sanity-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.sanity-fill.low {
+  background: #ff9800;
+}
+
+.sanity-fill.critical {
+  background: #f44336;
+  animation: sanity-pulse 1s infinite;
+}
+
+@keyframes sanity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.sanity-value {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
   text-align: center;
 }
 
@@ -601,6 +1090,17 @@ function getTotalProgress(): number {
   border-radius: 12px;
   color: var(--color-accent-light);
   text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.special-badge {
+  background: #ffd700;
+  color: #1a1a2e;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
 }
 
 .evidence-content {
@@ -613,7 +1113,8 @@ function getTotalProgress(): number {
   margin-bottom: 1rem;
 }
 
-.sanity-effect {
+.sanity-effect,
+.tool-info {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -621,6 +1122,12 @@ function getTotalProgress(): number {
   background: rgba(139, 58, 58, 0.1);
   border-radius: 6px;
   border: 1px solid var(--color-danger);
+  margin-bottom: 0.5rem;
+}
+
+.tool-info {
+  background: rgba(107, 76, 154, 0.1);
+  border-color: var(--color-accent);
 }
 
 .effect-label {
@@ -653,6 +1160,27 @@ function getTotalProgress(): number {
 
 .close-btn:hover {
   background: var(--color-accent-light);
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 @media (max-width: 1024px) {

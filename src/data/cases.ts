@@ -9,6 +9,7 @@ export const cases: Case[] = [
     status: 'available',
     sanityCost: 15,
     recommendedSanity: 80,
+    startingTools: ['tool-magnifier-basic', 'tool-fingerprint-kit', 'tool-uv-light'],
     scenes: [
       {
         id: 'scene-lighthouse',
@@ -26,6 +27,8 @@ export const cases: Case[] = [
             discovered: false,
             location: { x: 30, y: 45 },
             size: { width: 15, height: 20 },
+            baseHitRate: 75,
+            toolBoost: ['tool-magnifier-basic', 'tool-magnifier-pro'],
             hiddenClues: ['clue-call', 'clue-awakening']
           },
           {
@@ -36,7 +39,10 @@ export const cases: Case[] = [
             sanityEffect: -8,
             discovered: false,
             location: { x: 60, y: 30 },
-            size: { width: 20, height: 25 }
+            size: { width: 20, height: 25 },
+            baseHitRate: 60,
+            toolBoost: ['tool-uv-light', 'tool-uv-light-advanced'],
+            isSpecial: false
           },
           {
             id: 'evidence-telescope',
@@ -47,7 +53,23 @@ export const cases: Case[] = [
             discovered: false,
             location: { x: 75, y: 55 },
             size: { width: 12, height: 15 },
+            baseHitRate: 70,
+            toolBoost: ['tool-fingerprint-kit', 'tool-chemical-analyzer'],
             hiddenClues: ['clue-substance']
+          },
+          {
+            id: 'evidence-hidden-mark',
+            name: '隐藏的印记',
+            description: '在灯塔楼梯的暗处，有一个几乎看不见的手印印记，在紫外线下会发出诡异的绿色荧光。手印的指节数量...似乎不太对。',
+            type: 'trace',
+            sanityEffect: -12,
+            discovered: false,
+            location: { x: 45, y: 70 },
+            size: { width: 10, height: 12 },
+            baseHitRate: 30,
+            requiredTool: 'tool-uv-light',
+            isSpecial: true,
+            hiddenClues: ['clue-deep-one']
           }
         ]
       },
@@ -67,6 +89,8 @@ export const cases: Case[] = [
             discovered: false,
             location: { x: 45, y: 35 },
             size: { width: 18, height: 22 },
+            baseHitRate: 70,
+            toolBoost: ['tool-magnifier-basic'],
             hiddenClues: ['clue-organization']
           },
           {
@@ -78,6 +102,8 @@ export const cases: Case[] = [
             discovered: false,
             location: { x: 20, y: 60 },
             size: { width: 15, height: 18 },
+            baseHitRate: 65,
+            toolBoost: ['tool-magnifier-pro'],
             hiddenClues: ['clue-entity']
           },
           {
@@ -88,7 +114,23 @@ export const cases: Case[] = [
             sanityEffect: -6,
             discovered: false,
             location: { x: 70, y: 70 },
-            size: { width: 10, height: 12 }
+            size: { width: 10, height: 12 },
+            baseHitRate: 55,
+            toolBoost: ['tool-chemical-analyzer']
+          },
+          {
+            id: 'evidence-locked-drawer',
+            name: '上锁的抽屉',
+            description: '书桌最下面的抽屉被牢牢锁住，里面似乎藏着什么重要的东西。锁孔里有一些奇怪的刻痕。',
+            type: 'object',
+            sanityEffect: -8,
+            discovered: false,
+            location: { x: 55, y: 50 },
+            size: { width: 15, height: 10 },
+            baseHitRate: 40,
+            requiredTool: 'tool-lockpick',
+            isSpecial: true,
+            hiddenClues: ['clue-ritual']
           }
         ]
       },
@@ -107,7 +149,9 @@ export const cases: Case[] = [
             sanityEffect: -12,
             discovered: false,
             location: { x: 35, y: 50 },
-            size: { width: 25, height: 20 }
+            size: { width: 25, height: 20 },
+            baseHitRate: 80,
+            toolBoost: ['tool-magnifier-basic']
           },
           {
             id: 'evidence-footprints',
@@ -118,6 +162,8 @@ export const cases: Case[] = [
             discovered: false,
             location: { x: 65, y: 40 },
             size: { width: 20, height: 15 },
+            baseHitRate: 65,
+            toolBoost: ['tool-fingerprint-kit'],
             hiddenClues: ['clue-creature']
           },
           {
@@ -128,7 +174,23 @@ export const cases: Case[] = [
             sanityEffect: -5,
             discovered: false,
             location: { x: 80, y: 65 },
-            size: { width: 12, height: 18 }
+            size: { width: 12, height: 18 },
+            baseHitRate: 50,
+            toolBoost: ['tool-magnifier-basic', 'tool-fingerprint-kit']
+          },
+          {
+            id: 'evidence-whisper',
+            name: '诡异的低语',
+            description: '在海浪声中，你似乎能听到某种低沉的呢喃声。用录音设备捕捉后，发现那是一种不属于人类语言的诡异音节...',
+            type: 'testimony',
+            sanityEffect: -15,
+            discovered: false,
+            location: { x: 15, y: 30 },
+            size: { width: 18, height: 15 },
+            baseHitRate: 25,
+            requiredTool: 'tool-recorder',
+            isSpecial: true,
+            hiddenClues: ['clue-call-of-deep']
           }
         ]
       }
@@ -199,6 +261,42 @@ export const cases: Case[] = [
         importance: 4,
         discovered: false,
         analyzed: false
+      },
+      {
+        id: 'clue-deep-one',
+        name: '非人手印',
+        description: '隐藏在暗处的手印显示出某种非人特征——指节数量异常，指间有蹼状痕迹。这证实了深潜者的存在。',
+        type: 'physical',
+        source: '隐藏的印记',
+        connections: ['clue-creature', 'clue-ritual'],
+        importance: 5,
+        discovered: false,
+        analyzed: false,
+        requiredToolForAnalysis: 'tool-uv-light'
+      },
+      {
+        id: 'clue-ritual',
+        name: '献祭仪式',
+        description: '从锁着的抽屉中发现的仪式手册显示，守望者并非受害者，而是自愿的祭品。他相信通过献祭能够获得"深海的祝福"。',
+        type: 'documentary',
+        source: '上锁的抽屉',
+        connections: ['clue-awakening', 'clue-organization'],
+        importance: 5,
+        discovered: false,
+        analyzed: false,
+        requiredToolForAnalysis: 'tool-lockpick'
+      },
+      {
+        id: 'clue-call-of-deep',
+        name: '深海之音',
+        description: '录音中捕捉到的低语是某种古老的语言，反复提及"达贡"和"克苏鲁"的名号。这些声音似乎具有某种精神控制的力量。',
+        type: 'testimonial',
+        source: '诡异的低语',
+        connections: ['clue-entity', 'clue-call'],
+        importance: 5,
+        discovered: false,
+        analyzed: false,
+        requiredToolForAnalysis: 'tool-recorder'
       }
     ],
     conclusion: {
@@ -225,7 +323,8 @@ export const cases: Case[] = [
           text: '守望者被深海教团献祭，以唤醒某种古老存在',
           isCorrect: true,
           sanityCost: 10,
-          feedback: '所有证据都指向这个令人不安的真相。守望者成为了某个疯狂仪式的祭品...'
+          feedback: '所有证据都指向这个令人不安的真相。守望者成为了某个疯狂仪式的祭品...',
+          branch: 'standard'
         },
         {
           id: 'conclusion-transformation',
@@ -233,6 +332,16 @@ export const cases: Case[] = [
           isCorrect: false,
           sanityCost: 15,
           feedback: '这个推测有一定道理，但缺乏决定性证据支持...'
+        },
+        {
+          id: 'conclusion-deep-truth',
+          text: '守望者并非被献祭，而是回应了深海的召唤，自愿成为深潜者的一员',
+          isCorrect: false,
+          sanityCost: 20,
+          feedback: '你触及了更深层的真相...但这真的是正确的答案吗？',
+          requiredTools: ['tool-uv-light', 'tool-recorder', 'tool-lockpick'],
+          requiredEvidence: ['evidence-hidden-mark', 'evidence-whisper', 'evidence-locked-drawer'],
+          branch: 'deep-truth'
         }
       ]
     }
@@ -245,6 +354,7 @@ export const cases: Case[] = [
     status: 'locked',
     sanityCost: 25,
     recommendedSanity: 70,
+    startingTools: ['tool-magnifier-basic', 'tool-fingerprint-kit', 'tool-uv-light', 'tool-recorder'],
     scenes: [],
     clues: [],
     conclusion: {
@@ -277,6 +387,7 @@ export const cases: Case[] = [
     status: 'locked',
     sanityCost: 35,
     recommendedSanity: 60,
+    startingTools: ['tool-magnifier-pro', 'tool-uv-light-advanced', 'tool-chemical-analyzer'],
     scenes: [],
     clues: [],
     conclusion: {
@@ -312,4 +423,15 @@ export function unlockNextCase(currentCaseId: string): void {
   if (currentIndex >= 0 && currentIndex < cases.length - 1) {
     cases[currentIndex + 1].status = 'available'
   }
+}
+
+export function getEvidenceById(caseId: string, evidenceId: string) {
+  const caseData = getCaseById(caseId)
+  if (!caseData) return undefined
+  
+  for (const scene of caseData.scenes) {
+    const evidence = scene.evidence.find(e => e.id === evidenceId)
+    if (evidence) return evidence
+  }
+  return undefined
 }
