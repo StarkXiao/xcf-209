@@ -33,7 +33,7 @@ export const GLOBAL_MILESTONES: GlobalMilestone[] = [
     description: '解锁任意案件的深层真相分支',
     unlocked: false,
     requirement: { type: 'branch_unlocked', targetIds: ['deep-truth'] },
-    reward: { tools: ['tool-magnifier-pro'], unlockEndings: ['ending-true-awakening'] }
+    reward: { tools: ['tool-magnifier-pro'], unlockEndings: ['ending-true-awakening', 'ending-star-chamber'] }
   },
   {
     id: 'milestone-all-cases',
@@ -116,6 +116,16 @@ export const SPECIAL_EVIDENCE: SpecialEvidenceConfig[] = [
       { type: 'branch_unlocked', targetIds: ['deep-truth'] }
     ],
     ngPlusOnly: true
+  },
+  {
+    id: 'evidence-ngplus-dream-catcher',
+    caseId: 'case-003',
+    sceneId: 'scene-gallery',
+    unlockRequirements: [
+      { type: 'specific_case_completed', targetIds: ['case-002'] },
+      { type: 'branch_unlocked', targetIds: ['deep-truth'] }
+    ],
+    ngPlusOnly: true
   }
 ]
 
@@ -128,6 +138,17 @@ export const NGPLUS_ENDINGS: NewGamePlusEnding[] = [
     unlockRequirements: [
       { type: 'branch_unlocked', targetIds: ['deep-truth'] },
       { type: 'grade_achieved', minGrade: 'A' }
+    ],
+    isNgPlusExclusive: true
+  },
+  {
+    id: 'ending-star-chamber',
+    caseId: 'case-002',
+    name: '星庭裁决',
+    description: '你揭开了星庭裁决所的秘密，守护者以自身为牢封印着最危险的知识，而你选择了继承这份使命。',
+    unlockRequirements: [
+      { type: 'specific_case_completed', targetIds: ['case-001'] },
+      { type: 'branch_unlocked', targetIds: ['deep-truth'] }
     ],
     isNgPlusExclusive: true
   },

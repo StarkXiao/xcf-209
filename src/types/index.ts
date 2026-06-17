@@ -95,6 +95,7 @@ export interface Evidence {
   isSpecial?: boolean
   hiddenClues?: string[]
   isInitiallyHidden?: boolean
+  isNgPlusOnly?: boolean
   discoveryTrigger?: EvidenceDiscoveryTrigger
   materialDrops?: MaterialDrop[]
   processable?: boolean
@@ -148,6 +149,7 @@ export interface ConclusionOption {
   requiredTools?: string[]
   requiredEvidence?: string[]
   branch?: string
+  isNgPlusExclusive?: boolean
 }
 
 export interface Tool {

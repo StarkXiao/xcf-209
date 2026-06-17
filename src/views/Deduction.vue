@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useSaveStore } from '@/stores/save'
 import { useProgressStore } from '@/stores/progress'
+import { useNewGamePlusStore } from '@/stores/newGamePlus'
 import { getCaseById, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
 import type { ConclusionOption, CaseRewards, CaseScoreBreakdown } from '@/types'
@@ -13,6 +14,7 @@ const route = useRoute()
 const gameStore = useGameStore()
 const saveStore = useSaveStore()
 const progressStore = useProgressStore()
+const newGamePlusStore = useNewGamePlusStore()
 
 const selectedConclusion = ref<string | null>(null)
 const showResult = ref(false)
@@ -105,6 +107,8 @@ const visibleConclusionOptions = computed(() => {
   const completeness = intelligenceCompleteness.value
   return allConclusionOptions.value.filter(option => {
     if ((option as any).isFake) return true
+
+    if ((option as any).isNgPlusExclusive && !newGamePlusStore.state.isNewGamePlus) return false
 
     const index = caseData.value?.conclusion.options.findIndex(o => o.id === option.id) ?? -1
     
@@ -462,6 +466,26 @@ function getBranchInfo(branch: string): { name: string; description: string } {
     'deep-truth': {
       name: '深渊真相',
       description: '使用特殊工具发现隐藏证据，揭示更深层的真相'
+    },
+    'true-awakening': {
+      name: '真正的觉醒',
+      description: '🌟 二周目专属结局：理解契约的本质，见证真正的觉醒'
+    },
+    'star-chamber': {
+      name: '星庭裁决',
+      description: '🌟 二周目专属结局：揭开星庭裁决所的秘密'
+    },
+    'eternal-return': {
+      name: '永恒轮回',
+      description: '🌟 二周目专属结局：发现时间循环的真相'
+    },
+    'truth': {
+      name: '真相之路',
+      description: '走向裁决所的真相'
+    },
+    'eternal': {
+      name: '永恒守望',
+      description: '接受超越时间的使命'
     }
   }
   return branches[branch] || { name: branch, description: '' }
@@ -658,6 +682,9 @@ function disproveOption(optionId: string) {
                   </span>
                   <span v-if="isFakeOption(option.id)" class="fake-option-tag">
                     👻 幻觉
+                  </span>
+                  <span v-if="(option as any).isNgPlusExclusive" class="ngplus-option-tag">
+                    🔄 二周目
                   </span>
                   <span v-if="getOptionVisibility(option).obscured" class="obscured-tag">
                     🔒 遮蔽
@@ -1354,6 +1381,18 @@ function disproveOption(optionId: string) {
   padding: 0.15rem 0.5rem;
   background: linear-gradient(135deg, #9c27b0, #673ab7);
   color: white;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  width: fit-content;
+  margin-top: 0.25rem;
+}
+
+.ngplus-option-tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #1a1a2e;
   border-radius: 10px;
   font-size: 0.7rem;
   font-weight: bold;
