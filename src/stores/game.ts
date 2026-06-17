@@ -646,6 +646,7 @@ export const useGameStore = defineStore('game', () => {
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnEvidence(evidenceId)
 
+    checkSceneUnlockConditionsForAll()
     checkPhaseProgression()
     checkMailDelivery('evidence_discovered', evidenceId)
     updateDeductionCompleteness()
@@ -765,6 +766,7 @@ export const useGameStore = defineStore('game', () => {
     bestiaryStore.checkAndUnlockOnClue(clueId, true)
     
     checkEvidenceRefresh('after_analyze_clue', { clueId })
+    checkSceneUnlockConditionsForAll()
     checkPhaseProgression()
     checkMailDelivery('clue_analyzed', clueId)
     updateDeductionCompleteness()
@@ -870,6 +872,20 @@ export const useGameStore = defineStore('game', () => {
               if (Math.random() * 100 < chance) {
                 shouldUnlock = true
                 unlockReason = `随机发现`
+              }
+            }
+            break
+
+          case 'evidence_combo':
+            if (triggerType === 'after_discover_evidence' || triggerType === 'after_search') {
+              if (trigger.requiredEvidenceIds && trigger.requiredEvidenceIds.length > 0) {
+                const hasAll = trigger.requiredEvidenceIds.every(eid =>
+                  gameState.value.discoveredEvidence.includes(eid)
+                )
+                if (hasAll) {
+                  shouldUnlock = true
+                  unlockReason = `收集到关键证据组合后解锁`
+                }
               }
             }
             break
@@ -2101,6 +2117,114 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function checkEvidenceCombo(requiredIds: string[]): boolean {
+    return requiredIds.every(id => gameState.value.discoveredEvidence.includes(id))
+  }
+
+  function checkClueCombo(requiredIds: string[]): boolean {
+    return requiredIds.every(id => gameState.value.discoveredClues.includes(id))
+  }
+
+  function getSceneUnlockConditionProgress(sceneId: string): {
+    total: number
+    satisfied: number
+    description: string
+  } | null {
+    if (!currentCase.value) return null
+    const scene = currentCase.value.scenes.find(s => s.id === sceneId)
+    if (!scene || !scene.unlockConditions || scene.unlockConditions.length === 0) return null
+
+    let total = 0
+    let satisfied = 0
+    const descriptions: string[] = []
+
+    for (const condition of scene.unlockConditions) {
+      if (condition.type === 'evidence_combo' && condition.requiredEvidenceIds) {
+        total += condition.requiredEvidenceIds.length
+        const satisfiedCount = condition.requiredEvidenceIds.filter(
+          id => gameState.value.discoveredEvidence.includes(id)
+        ).length
+        satisfied += satisfiedCount
+        if (condition.description) descriptions.push(condition.description)
+      } else if (condition.type === 'clue_combo' && condition.requiredClueIds) {
+        total += condition.requiredClueIds.length
+        const satisfiedCount = condition.requiredClueIds.filter(
+          id => gameState.value.discoveredClues.includes(id)
+        ).length
+        satisfied += satisfiedCount
+        if (condition.description) descriptions.push(condition.description)
+      } else if (condition.type === 'any_evidence' && condition.requiredEvidenceIds && condition.requiredCount) {
+        total += condition.requiredCount
+        const satisfiedCount = Math.min(
+          condition.requiredCount,
+          condition.requiredEvidenceIds.filter(id => gameState.value.discoveredEvidence.includes(id)).length
+        )
+        satisfied += satisfiedCount
+        if (condition.description) descriptions.push(condition.description)
+      } else if (condition.type === 'any_clue' && condition.requiredClueIds && condition.requiredCount) {
+        total += condition.requiredCount
+        const satisfiedCount = Math.min(
+          condition.requiredCount,
+          condition.requiredClueIds.filter(id => gameState.value.discoveredClues.includes(id)).length
+        )
+        satisfied += satisfiedCount
+        if (condition.description) descriptions.push(condition.description)
+      }
+    }
+
+    return {
+      total,
+      satisfied,
+      description: descriptions.join('、') || '收集更多证据以解锁'
+    }
+  }
+
+  function checkSceneUnlockConditions(sceneId: string): boolean {
+    if (!currentCase.value) return false
+    const scene = currentCase.value.scenes.find(s => s.id === sceneId)
+    if (!scene || !scene.unlockConditions || scene.unlockConditions.length === 0) return false
+
+    for (const condition of scene.unlockConditions) {
+      switch (condition.type) {
+        case 'evidence_combo':
+          if (!condition.requiredEvidenceIds) continue
+          if (!checkEvidenceCombo(condition.requiredEvidenceIds)) return false
+          break
+        case 'clue_combo':
+          if (!condition.requiredClueIds) continue
+          if (!checkClueCombo(condition.requiredClueIds)) return false
+          break
+        case 'any_evidence':
+          if (!condition.requiredEvidenceIds || !condition.requiredCount) continue
+          const evidenceCount = condition.requiredEvidenceIds.filter(
+            id => gameState.value.discoveredEvidence.includes(id)
+          ).length
+          if (evidenceCount < condition.requiredCount) return false
+          break
+        case 'any_clue':
+          if (!condition.requiredClueIds || !condition.requiredCount) continue
+          const clueCount = condition.requiredClueIds.filter(
+            id => gameState.value.discoveredClues.includes(id)
+          ).length
+          if (clueCount < condition.requiredCount) return false
+          break
+      }
+    }
+    return true
+  }
+
+  function checkSceneUnlockConditionsForAll() {
+    if (!currentCase.value) return
+    for (const scene of currentCase.value.scenes) {
+      if (!isSceneUnlocked(scene.id) && scene.unlockConditions) {
+        if (checkSceneUnlockConditions(scene.id)) {
+          gameState.value.intelligenceState.sceneUnlockProgress[scene.id] = 100
+          addLog('discovery', `🔓 解锁隐藏场景：${scene.name}`)
+        }
+      }
+    }
+  }
+
   function isSceneUnlocked(sceneId: string): boolean {
     if (!currentCase.value) return false
     
@@ -2113,6 +2237,12 @@ export const useGameStore = defineStore('game', () => {
           return true
         }
       }
+    }
+
+    if (checkSceneUnlockConditions(sceneId)) {
+      gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+      addLog('discovery', `🔓 解锁隐藏场景：${sceneId}`)
+      return true
     }
 
     return false
@@ -2283,6 +2413,11 @@ export const useGameStore = defineStore('game', () => {
     isSceneUnlocked,
     getSceneUnlockingPhase,
     getUnlockedScenes,
+    checkEvidenceCombo,
+    checkClueCombo,
+    checkSceneUnlockConditions,
+    checkSceneUnlockConditionsForAll,
+    getSceneUnlockConditionProgress,
     resetGame
   }
 })

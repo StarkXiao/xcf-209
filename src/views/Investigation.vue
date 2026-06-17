@@ -138,12 +138,20 @@ function selectScene(scene: Scene) {
 }
 
 function getSceneLockReason(scene: Scene): string {
+  const comboProgress = gameStore.getSceneUnlockConditionProgress(scene.id)
+  if (comboProgress) {
+    return comboProgress.description
+  }
   const phaseId = gameStore.getSceneUnlockingPhase(scene.id)
   if (!phaseId) return ''
   const phase = gameStore.allPhases.find(p => p.id === phaseId)
   if (!phase) return ''
   if (phase.isActive || phase.isCompleted) return ''
   return `需要解锁阶段：${phase.name}`
+}
+
+function getSceneComboProgress(scene: Scene): { total: number; satisfied: number } | null {
+  return gameStore.getSceneUnlockConditionProgress(scene.id)
 }
 
 function getEvidencePosition(evidence: Evidence) {
@@ -434,7 +442,8 @@ function getMilestoneDescription(msId: string): string {
               class="scene-item"
               :class="{ 
                 active: currentScene?.id === scene.id,
-                locked: !gameStore.isSceneUnlocked(scene.id)
+                locked: !gameStore.isSceneUnlocked(scene.id),
+                'hidden-scene': scene.unlockConditions && scene.unlockConditions.length > 0
               }"
               @click="selectScene(scene)"
             >
@@ -444,6 +453,17 @@ function getMilestoneDescription(msId: string): string {
               </div>
               <div v-if="!gameStore.isSceneUnlocked(scene.id)" class="scene-lock-reason">
                 {{ getSceneLockReason(scene) }}
+              </div>
+              <div v-if="!gameStore.isSceneUnlocked(scene.id) && getSceneComboProgress(scene)" class="scene-combo-progress">
+                <div class="combo-progress-bar">
+                  <div 
+                    class="combo-progress-fill"
+                    :style="{ width: `${getSceneComboProgress(scene)!.total > 0 ? (getSceneComboProgress(scene)!.satisfied / getSceneComboProgress(scene)!.total) * 100 : 0}%` }"
+                  ></div>
+                </div>
+                <span class="combo-progress-text">
+                  🔗 证据组合: {{ getSceneComboProgress(scene)!.satisfied }}/{{ getSceneComboProgress(scene)!.total }}
+                </span>
               </div>
               <div v-else class="scene-progress">
                 <div class="mini-progress">
@@ -981,6 +1001,7 @@ function getMilestoneDescription(msId: string): string {
 }
 
 .scene-item {
+  position: relative;
   padding: 0.75rem;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--color-border);
@@ -1010,6 +1031,29 @@ function getMilestoneDescription(msId: string): string {
   background: rgba(0, 0, 0, 0.2);
 }
 
+.scene-item.hidden-scene {
+  border: 1px solid rgba(139, 74, 201, 0.3);
+  background: linear-gradient(135deg, rgba(139, 74, 201, 0.08), rgba(0, 0, 0, 0.2));
+}
+
+.scene-item.hidden-scene::before {
+  content: '🔮';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.scene-item.hidden-scene:not(.locked) {
+  border-color: #8b4ac9;
+  box-shadow: 0 0 15px rgba(139, 74, 201, 0.25);
+}
+
+.scene-item.hidden-scene:not(.locked) .scene-name {
+  color: #c9a0ff;
+}
+
 .lock-icon {
   margin-right: 0.35rem;
   font-size: 0.85rem;
@@ -1020,6 +1064,33 @@ function getMilestoneDescription(msId: string): string {
   color: var(--color-warning);
   margin-top: 0.25rem;
   font-style: italic;
+}
+
+.scene-combo-progress {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.combo-progress-bar {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+.combo-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd700, #ff8c00);
+  transition: width 0.4s ease;
+}
+
+.combo-progress-text {
+  font-size: 0.75rem;
+  color: #ffd700;
+  font-weight: 600;
 }
 
 .scene-name {

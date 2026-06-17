@@ -68,6 +68,14 @@ export interface ChapterNode {
   isLocked: boolean
 }
 
+export interface SceneUnlockCondition {
+  type: 'evidence_combo' | 'clue_combo' | 'any_evidence' | 'any_clue'
+  requiredEvidenceIds?: string[]
+  requiredClueIds?: string[]
+  requiredCount?: number
+  description?: string
+}
+
 export interface Scene {
   id: string
   name: string
@@ -77,6 +85,7 @@ export interface Scene {
   searched: boolean
   locked?: boolean
   unlockCondition?: string
+  unlockConditions?: SceneUnlockCondition[]
 }
 
 export interface Evidence {
@@ -103,13 +112,15 @@ export interface Evidence {
 }
 
 export interface EvidenceDiscoveryTrigger {
-  type: 'clue_analyzed' | 'evidence_discovered' | 'scene_visited_count' | 'search_attempt_count' | 'random_after_search'
+  type: 'clue_analyzed' | 'evidence_discovered' | 'scene_visited_count' | 'search_attempt_count' | 'random_after_search' | 'evidence_combo'
   requiredClueId?: string
   requiredEvidenceId?: string
   requiredSceneVisitCount?: number
   requiredSearchAttempts?: number
   chance?: number
   sceneId?: string
+  requiredEvidenceIds?: string[]
+  requiredClueIds?: string[]
 }
 
 export interface Clue {

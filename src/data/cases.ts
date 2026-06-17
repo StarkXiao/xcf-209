@@ -406,6 +406,109 @@ export const cases = reactive<Case[]>([
               { materialId: 'mat-mysterious-liquid', minQuantity: 1, maxQuantity: 2, chance: 60 },
               { materialId: 'mat-crystal-shard', minQuantity: 1, maxQuantity: 1, chance: 35 }
             ]
+          },
+          {
+            id: 'evidence-abyss-gateway',
+            name: '深渊之门',
+            description: '当你将变异死鱼、奇怪脚印和诡异低语联系在一起时，海滩深处浮现出一个半透明的光门。门后是漆黑的海水，但你隐约能听到...某种有节奏的心跳声。',
+            type: 'trace',
+            sanityEffect: -25,
+            discovered: false,
+            location: { x: 50, y: 50 },
+            size: { width: 20, height: 25 },
+            baseHitRate: 15,
+            toolBoost: ['tool-uv-light-advanced', 'tool-chemical-analyzer'],
+            isInitiallyHidden: true,
+            isSpecial: true,
+            discoveryTrigger: {
+              type: 'evidence_combo',
+              requiredEvidenceIds: ['evidence-fish', 'evidence-footprints', 'evidence-whisper']
+            },
+            hiddenClues: ['clue-abyss-gateway'],
+            materialDrops: [
+              { materialId: 'mat-abyssal-essence', minQuantity: 3, maxQuantity: 5, chance: 100 },
+              { materialId: 'mat-ancient-rune', minQuantity: 2, maxQuantity: 4, chance: 80 },
+              { materialId: 'mat-elder-sign', minQuantity: 1, maxQuantity: 2, chance: 50 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-elder-sign-craft'
+          }
+        ]
+      },
+      {
+        id: 'scene-abyss-altar',
+        name: '深渊祭坛',
+        description: '穿过光门后，你来到了一个不该存在于现实中的空间。一座古老的祭坛矗立在黑暗中，祭坛中央的凹陷处放着一个仍在跳动的心脏——这就是所有异变的源头。空气中弥漫着令人窒息的威压，你能感觉到某种古老的存在正在注视着你...',
+        background: 'shore',
+        searched: false,
+        locked: true,
+        unlockConditions: [
+          {
+            type: 'evidence_combo',
+            requiredEvidenceIds: ['evidence-abyss-gateway', 'evidence-hidden-mark', 'evidence-locked-drawer'],
+            description: '收集深渊之门、隐藏印记和上锁抽屉中的证据'
+          }
+        ],
+        evidence: [
+          {
+            id: 'evidence-altar-heart',
+            name: '祭坛之心',
+            description: '祭坛中央跳动的心脏，不属于任何已知生物。它的每一次跳动都会让你感到一阵精神刺痛，仿佛它正在与你的心跳产生共鸣。',
+            type: 'object',
+            sanityEffect: -30,
+            discovered: false,
+            location: { x: 50, y: 50 },
+            size: { width: 20, height: 20 },
+            baseHitRate: 20,
+            toolBoost: ['tool-chemical-analyzer', 'tool-uv-light-advanced'],
+            isSpecial: true,
+            hiddenClues: ['clue-covenant'],
+            materialDrops: [
+              { materialId: 'mat-abyssal-essence', minQuantity: 5, maxQuantity: 8, chance: 100 },
+              { materialId: 'mat-elder-sign', minQuantity: 2, maxQuantity: 3, chance: 80 },
+              { materialId: 'mat-mind-focus', minQuantity: 2, maxQuantity: 3, chance: 60 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-special-analysis'
+          },
+          {
+            id: 'evidence-altar-inscription',
+            name: '祭坛铭文',
+            description: '祭坛四周的墙壁上刻满了古老的铭文，记录着一个关于"自愿献祭"的古老仪式——守望者并非受害者，而是延续契约的执行者。铭文最后写道："当门开启之时，选择将降临于后来者。"',
+            type: 'trace',
+            sanityEffect: -15,
+            discovered: false,
+            location: { x: 25, y: 30 },
+            size: { width: 30, height: 15 },
+            baseHitRate: 50,
+            toolBoost: ['tool-magnifier-pro', 'tool-uv-light'],
+            isSpecial: true,
+            hiddenClues: ['clue-truth'],
+            materialDrops: [
+              { materialId: 'mat-ancient-rune', minQuantity: 4, maxQuantity: 6, chance: 100 },
+              { materialId: 'mat-cipher-text', minQuantity: 2, maxQuantity: 3, chance: 70 }
+            ],
+            processable: true,
+            processRecipeId: 'recipe-cipher-decode'
+          },
+          {
+            id: 'evidence-watcher-remains',
+            name: '守望者残躯',
+            description: '祭坛角落有一套半透明的守望者制服，制服下隐约可见某种非人形态的轮廓。他真的完成了蜕变——不是死亡，而是进化成了某种介于人与深潜者之间的存在。',
+            type: 'trace',
+            sanityEffect: -22,
+            discovered: false,
+            location: { x: 75, y: 65 },
+            size: { width: 18, height: 22 },
+            baseHitRate: 35,
+            toolBoost: ['tool-fingerprint-kit', 'tool-chemical-analyzer'],
+            isSpecial: true,
+            hiddenClues: ['clue-deep-one'],
+            materialDrops: [
+              { materialId: 'mat-organic-residue', minQuantity: 5, maxQuantity: 8, chance: 100 },
+              { materialId: 'mat-mysterious-liquid', minQuantity: 3, maxQuantity: 5, chance: 80 },
+              { materialId: 'mat-abyssal-essence', minQuantity: 2, maxQuantity: 3, chance: 50 }
+            ]
           }
         ]
       }
@@ -531,6 +634,17 @@ export const cases = reactive<Case[]>([
         type: 'deduction',
         source: '远古手稿',
         connections: ['clue-truth', 'clue-deep-one'],
+        importance: 5,
+        discovered: false,
+        analyzed: false
+      },
+      {
+        id: 'clue-abyss-gateway',
+        name: '深渊之门',
+        description: '海滩深处浮现的光门是通往某种异度空间的入口。门后传来的心跳声表明，某种庞然大物正在门的另一侧等待着...这就是守望者最终的归宿。',
+        type: 'deduction',
+        source: '变异死鱼 + 奇怪脚印 + 诡异低语',
+        connections: ['clue-entity', 'clue-ritual', 'clue-covenant'],
         importance: 5,
         discovered: false,
         analyzed: false
