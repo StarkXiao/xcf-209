@@ -142,6 +142,55 @@ export interface ClueConnection {
   clue2Id: string
   relationship: string
   confirmed: boolean
+  confidence?: number
+  supportedBy?: string[]
+  createdAt?: number
+}
+
+export type AnnotationType = 'note' | 'question' | 'hypothesis' | 'important' | 'contradiction'
+
+export interface ClueAnnotation {
+  id: string
+  clueId: string
+  content: string
+  type: AnnotationType
+  createdAt: number
+  updatedAt: number
+  author?: string
+}
+
+export interface ClueConfidence {
+  clueId: string
+  confidence: number
+  reasoning: string
+  taggedAt: number
+  tags: string[]
+  evidenceSupporting: string[]
+  evidenceContradicting: string[]
+}
+
+export interface ClueComparison {
+  id: string
+  clue1Id: string
+  clue2Id: string
+  similarities: string[]
+  differences: string[]
+  conclusion: string
+  supportsConnection: boolean
+  connectionConfidence: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface DeductionHint {
+  id: string
+  type: 'suggestion' | 'warning' | 'insight' | 'contradiction'
+  content: string
+  relatedClues: string[]
+  relatedConnections?: string[]
+  priority: number
+  source: 'annotation' | 'comparison' | 'confidence' | 'pattern'
+  createdAt: number
 }
 
 export interface Conclusion {
@@ -362,9 +411,12 @@ export interface GameState {
   craftingHistory: string[]
   intelligenceState: IntelligenceState
   mailDeliveryEvents: MailDeliveryEvent[]
-  annotations: ClueAnnotation[]
-  comparisons: ClueComparison[]
-  credibilityMarks: CredibilityMark[]
+  clueAnnotations: ClueAnnotation[]
+  clueConfidences: ClueConfidence[]
+  clueComparisons: ClueComparison[]
+  deductionHints: DeductionHint[]
+  comparisonMode: boolean
+  comparisonSelectedClues: string[]
 }
 
 export interface SaveData {
@@ -694,9 +746,6 @@ export interface GraphEdge {
   errorMessage?: string
   createdAt: number
   createdBy?: string
-  successRate?: number
-  confirmAttempts?: number
-  lastConfirmResult?: 'success' | 'failure'
 }
 
 export interface GraphValidationResult {
@@ -1277,56 +1326,6 @@ export interface ReplayExportData {
     totalDuration: number
     sanityLost: number
   }
-}
-
-export type CredibilityLevel = 'verified' | 'reliable' | 'uncertain' | 'suspect' | 'contradicted'
-
-export interface ClueAnnotation {
-  id: string
-  clueId: string
-  content: string
-  createdAt: number
-  updatedAt: number
-  type: 'note' | 'highlight' | 'question' | 'insight'
-}
-
-export interface ClueComparison {
-  id: string
-  clue1Id: string
-  clue2Id: string
-  similarity: number
-  conflict: boolean
-  notes: string
-  createdAt: number
-}
-
-export interface CredibilityMark {
-  clueId: string
-  level: CredibilityLevel
-  markedAt: number
-  reason?: string
-  verifiedBy?: string
-}
-
-export interface CredibilityEffect {
-  connectionSuccessModifier: number
-  deductionHintBonus: number
-  description: string
-}
-
-export const CREDIBILITY_LEVELS: Record<CredibilityLevel, CredibilityEffect> = {
-  verified: { connectionSuccessModifier: 0.2, deductionHintBonus: 15, description: '已验证' },
-  reliable: { connectionSuccessModifier: 0.1, deductionHintBonus: 8, description: '可靠' },
-  uncertain: { connectionSuccessModifier: 0, deductionHintBonus: 0, description: '不确定' },
-  suspect: { connectionSuccessModifier: -0.15, deductionHintBonus: -5, description: '可疑' },
-  contradicted: { connectionSuccessModifier: -0.3, deductionHintBonus: -10, description: '已矛盾' }
-}
-
-export const ANNOTATION_TYPE_ICONS: Record<ClueAnnotation['type'], string> = {
-  note: '📝',
-  highlight: '🖍️',
-  question: '❓',
-  insight: '💡'
 }
 
 export interface ReplayStats {

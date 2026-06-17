@@ -400,8 +400,6 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       return null
     }
 
-    const { rate: initialRate } = gameStore.calculateConnectionSuccessRate(sourceId, targetId)
-
     const newEdge: GraphEdge = {
       id: generateId(),
       sourceId,
@@ -409,8 +407,6 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       relationship,
       confidence,
       confirmed: false,
-      successRate: initialRate,
-      confirmAttempts: 0,
       createdAt: Date.now()
     }
 
@@ -726,42 +722,8 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     validateGraph()
   }
 
-  function confirmEdge(edgeId: string): { success: boolean; rate: number; roll: number; breakdown: string[] } {
-    const edge = graphState.value.edges.find(e => e.id === edgeId)
-    if (!edge) return { success: false, rate: 0, roll: 0, breakdown: ['边不存在'] }
-
-    const { rate, breakdown } = gameStore.calculateConnectionSuccessRate(edge.sourceId, edge.targetId)
-    const roll = Math.random()
-    const success = roll < rate
-
-    const attempts = (edge.confirmAttempts || 0) + 1
-
-    if (success) {
-      updateEdge(edgeId, { 
-        confirmed: true, 
-        confidence: Math.round(rate * 100),
-        successRate: rate,
-        confirmAttempts: attempts,
-        lastConfirmResult: 'success'
-      })
-      gameStore.addLog('connection', `连线确认成功！成功率 ${Math.round(rate * 100)}%，掷骰 ${Math.round(roll * 100)}`)
-    } else {
-      updateEdge(edgeId, { 
-        confidence: Math.round(rate * 100),
-        successRate: rate,
-        confirmAttempts: attempts,
-        lastConfirmResult: 'failure'
-      })
-      gameStore.addLog('connection', `连线确认失败。成功率 ${Math.round(rate * 100)}%，掷骰 ${Math.round(roll * 100)}`)
-    }
-
-    return { success, rate, roll, breakdown }
-  }
-
-  function getEdgeSuccessRate(edgeId: string): { rate: number; breakdown: string[] } {
-    const edge = graphState.value.edges.find(e => e.id === edgeId)
-    if (!edge) return { rate: 0, breakdown: [] }
-    return gameStore.calculateConnectionSuccessRate(edge.sourceId, edge.targetId)
+  function confirmEdge(edgeId: string) {
+    updateEdge(edgeId, { confirmed: true, confidence: 100 })
   }
 
   function startPlayback(speed: number = 1) {
@@ -962,7 +924,6 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     setPan,
     resetLayout,
     confirmEdge,
-    getEdgeSuccessRate,
     undo,
     redo,
     startPlayback,

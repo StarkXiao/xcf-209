@@ -7,7 +7,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useNewGamePlusStore } from '@/stores/newGamePlus'
 import { getCaseById, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
-import type { ConclusionOption, CaseRewards, CaseScoreBreakdown } from '@/types'
+import type { ConclusionOption, CaseRewards, CaseScoreBreakdown, DeductionHint } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -28,6 +28,7 @@ const isFirstCompletion = ref(false)
 const newlyUnlockedCases = ref<string[]>([])
 const caseScore = ref<CaseScoreBreakdown | null>(null)
 const usedTime = ref(0)
+const showAnalysisHints = ref(true)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -62,7 +63,7 @@ function getRiskColor(level: string): string {
 }
 
 const intelligenceCompleteness = computed(() => {
-  return gameStore.modifiedDeductionInfoCompleteness
+  return gameStore.deductionInfoCompleteness
 })
 
 const completenessLevel = computed(() => {
@@ -121,6 +122,44 @@ const visibleConclusionOptions = computed(() => {
 
 const isFakeOption = (optionId: string) => {
   return gameStore.isFakeDeductionOption(optionId)
+}
+
+const analysisHints = computed(() => {
+  return gameStore.getDeductionHints(15)
+})
+
+const analysisStats = computed(() => {
+  return {
+    annotations: gameStore.gameState.clueAnnotations.length,
+    comparisons: gameStore.gameState.clueComparisons.length,
+    confidenceMarks: gameStore.gameState.clueConfidences.length,
+    highConfidenceCount: gameStore.gameState.clueConfidences.filter(c => c.confidence >= 70).length,
+    lowConfidenceCount: gameStore.gameState.clueConfidences.filter(c => c.confidence <= 30).length
+  }
+})
+
+function getHintIcon(type: DeductionHint['type']): string {
+  const icons: Record<string, string> = {
+    suggestion: '💡',
+    warning: '⚠️',
+    insight: '🔍',
+    contradiction: '❌'
+  }
+  return icons[type] || '📌'
+}
+
+function getHintColor(type: DeductionHint['type']): string {
+  const colors: Record<string, string> = {
+    suggestion: '#6b4c9a',
+    warning: '#ff9800',
+    insight: '#3a8b5a',
+    contradiction: '#f44336'
+  }
+  return colors[type] || '#888'
+}
+
+function dismissHint(hintId: string) {
+  gameStore.dismissDeductionHint(hintId)
 }
 
 const hasEnoughEvidence = computed(() => {
@@ -573,6 +612,70 @@ function disproveOption(optionId: string) {
               <span v-else>✓ 情报充分，可进行全面推演</span>
             </div>
           </div>
+
+          <div v-if="analysisStats.annotations > 0 || analysisStats.comparisons > 0 || analysisStats.confidenceMarks > 0" class="analysis-stats-section">
+            <h4>线索分析统计</h4>
+            <div class="analysis-stats-grid">
+              <div class="analysis-stat-item">
+                <span class="stat-icon">📝</span>
+                <span class="stat-value">{{ analysisStats.annotations }}</span>
+                <span class="stat-label">批注</span>
+              </div>
+              <div class="analysis-stat-item">
+                <span class="stat-icon">⚖️</span>
+                <span class="stat-value">{{ analysisStats.comparisons }}</span>
+                <span class="stat-label">比对</span>
+              </div>
+              <div class="analysis-stat-item">
+                <span class="stat-icon">🎯</span>
+                <span class="stat-value">{{ analysisStats.confidenceMarks }}</span>
+                <span class="stat-label">可信度</span>
+              </div>
+              <div v-if="analysisStats.highConfidenceCount > 0" class="analysis-stat-item high">
+                <span class="stat-icon">✓</span>
+                <span class="stat-value">{{ analysisStats.highConfidenceCount }}</span>
+                <span class="stat-label">高可信度</span>
+              </div>
+              <div v-if="analysisStats.lowConfidenceCount > 0" class="analysis-stat-item low">
+                <span class="stat-icon">⚠️</span>
+                <span class="stat-value">{{ analysisStats.lowConfidenceCount }}</span>
+                <span class="stat-label">存疑</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="showAnalysisHints && analysisHints.length > 0" class="analysis-hints-section">
+            <div class="section-header">
+              <h4>🔍 分析推演提示</h4>
+              <button class="toggle-btn" @click="showAnalysisHints = false">隐藏</button>
+            </div>
+            <div class="analysis-hints-list">
+              <div 
+                v-for="hint in analysisHints" 
+                :key="hint.id"
+                class="analysis-hint-item"
+                :style="{ borderLeftColor: getHintColor(hint.type) }"
+              >
+                <span class="hint-icon">{{ getHintIcon(hint.type) }}</span>
+                <div class="hint-content">
+                  <p class="hint-text">{{ hint.content }}</p>
+                  <div v-if="hint.relatedClues.length > 0" class="hint-related">
+                    <span>相关线索: </span>
+                    <span v-for="clueId in hint.relatedClues" :key="clueId" class="related-clue-tag">
+                      {{ gameStore.getClueById(clueId)?.name || clueId }}
+                    </span>
+                  </div>
+                </div>
+                <button class="dismiss-btn" @click="dismissHint(hint.id)">×</button>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="!showAnalysisHints && analysisHints.length > 0" class="analysis-hints-collapsed">
+            <button class="toggle-btn" @click="showAnalysisHints = true">
+              🔍 显示 {{ analysisHints.length }} 条推演提示
+            </button>
+          </div>
           
           <div class="progress-section">
             <div class="progress-header">
@@ -641,33 +744,6 @@ function disproveOption(optionId: string) {
                   <span class="branch-desc">{{ getBranchInfo(branchId).description }}</span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div v-if="gameStore.gameState.credibilityMarks.length > 0 || gameStore.gameState.comparisons.length > 0" class="credibility-summary-section">
-            <h4>线索分析状态</h4>
-            <div class="credibility-summary-grid">
-              <div class="credibility-stat">
-                <span class="credibility-stat-label">已验证</span>
-                <span class="credibility-stat-value verified">{{ gameStore.getVerifiedClueCount() }}</span>
-              </div>
-              <div class="credibility-stat">
-                <span class="credibility-stat-label">可疑</span>
-                <span class="credibility-stat-value suspect">{{ gameStore.getSuspectClueCount() }}</span>
-              </div>
-              <div class="credibility-stat">
-                <span class="credibility-stat-label">比对次数</span>
-                <span class="credibility-stat-value">{{ gameStore.gameState.comparisons.length }}</span>
-              </div>
-              <div class="credibility-stat">
-                <span class="credibility-stat-label">批注数</span>
-                <span class="credibility-stat-value">{{ gameStore.gameState.annotations.length }}</span>
-              </div>
-            </div>
-            <div v-if="gameStore.getTotalDeductionHintBonus() !== 0" class="credibility-bonus-info">
-              <span :class="gameStore.getTotalDeductionHintBonus() > 0 ? 'bonus-positive' : 'bonus-negative'">
-                🏷️ 可信度推演修正: {{ gameStore.getTotalDeductionHintBonus() > 0 ? '+' : '' }}{{ gameStore.getTotalDeductionHintBonus() }}%
-              </span>
             </div>
           </div>
         </div>
@@ -1289,74 +1365,6 @@ function disproveOption(optionId: string) {
 .branch-desc {
   font-size: 0.75rem;
   color: var(--color-text-dim);
-}
-
-.credibility-summary-section {
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.credibility-summary-section h4 {
-  color: var(--color-text);
-  margin-bottom: 0.75rem;
-  font-size: 0.95rem;
-}
-
-.credibility-summary-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.credibility-stat {
-  padding: 0.5rem;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  text-align: center;
-}
-
-.credibility-stat-label {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
-}
-
-.credibility-stat-value {
-  font-size: 1.1rem;
-  font-weight: bold;
-  color: var(--color-text);
-}
-
-.credibility-stat-value.verified {
-  color: var(--color-success);
-}
-
-.credibility-stat-value.suspect {
-  color: #ff9800;
-}
-
-.credibility-bonus-info {
-  padding: 0.5rem;
-  border-radius: 6px;
-  text-align: center;
-  font-size: 0.85rem;
-}
-
-.bonus-positive {
-  color: var(--color-success);
-  background: rgba(58, 139, 90, 0.1);
-  padding: 0.35rem 0.75rem;
-  border-radius: 6px;
-}
-
-.bonus-negative {
-  color: var(--color-danger);
-  background: rgba(139, 58, 58, 0.1);
-  padding: 0.35rem 0.75rem;
-  border-radius: 6px;
 }
 
 .conclusion-panel {
@@ -2132,6 +2140,194 @@ function disproveOption(optionId: string) {
     box-shadow: 0 0 30px rgba(156, 39, 176, 0.9);
     filter: hue-rotate(20deg);
   }
+}
+
+.analysis-stats-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(58, 139, 90, 0.1);
+  border: 1px solid rgba(58, 139, 90, 0.3);
+  border-radius: 6px;
+}
+
+.analysis-stats-section h4 {
+  color: var(--color-success);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+
+.analysis-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.analysis-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.analysis-stat-item.high {
+  background: rgba(58, 139, 90, 0.2);
+  border: 1px solid rgba(58, 139, 90, 0.4);
+}
+
+.analysis-stat-item.low {
+  background: rgba(244, 67, 54, 0.15);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.analysis-stat-item .stat-icon {
+  font-size: 1.2rem;
+}
+
+.analysis-stat-item .stat-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.analysis-stat-item.high .stat-value {
+  color: var(--color-success);
+}
+
+.analysis-stat-item.low .stat-value {
+  color: #f44336;
+}
+
+.analysis-stat-item .stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+}
+
+.analysis-hints-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(107, 76, 154, 0.1);
+  border: 1px solid rgba(107, 76, 154, 0.3);
+  border-radius: 6px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.section-header h4 {
+  color: var(--color-accent-light);
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.toggle-btn {
+  padding: 0.25rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--color-text);
+}
+
+.analysis-hints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.analysis-hint-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 4px;
+}
+
+.analysis-hint-item .hint-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.analysis-hint-item .hint-content {
+  flex: 1;
+}
+
+.analysis-hint-item .hint-text {
+  color: var(--color-text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0 0 0.5rem 0;
+}
+
+.analysis-hint-item .hint-related {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.related-clue-tag {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  background: rgba(107, 76, 154, 0.3);
+  border-radius: 4px;
+  color: var(--color-accent-light);
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+
+.analysis-hint-item .dismiss-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.analysis-hint-item .dismiss-btn:hover {
+  color: var(--color-text);
+}
+
+.analysis-hints-collapsed {
+  margin-bottom: 1.5rem;
+  padding: 0.75rem;
+  background: rgba(107, 76, 154, 0.1);
+  border: 1px solid rgba(107, 76, 154, 0.3);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.analysis-hints-collapsed .toggle-btn {
+  width: 100%;
+  padding: 0.5rem;
+  background: rgba(107, 76, 154, 0.2);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent-light);
+}
+
+.analysis-hints-collapsed .toggle-btn:hover {
+  background: rgba(107, 76, 154, 0.4);
 }
 
 @media (max-width: 1024px) {

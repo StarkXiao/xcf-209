@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueComparison, CredibilityMark, CredibilityLevel } from '@/types'
-import { CREDIBILITY_LEVELS } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -120,9 +119,12 @@ export const useGameStore = defineStore('game', () => {
     intelligenceState: createInitialIntelligenceState(),
     mailDeliveryEvents: [],
     spiritualPollution: createInitialPollutionState(),
-    annotations: [],
-    comparisons: [],
-    credibilityMarks: []
+    clueAnnotations: [],
+    clueConfidences: [],
+    clueComparisons: [],
+    deductionHints: [],
+    comparisonMode: false,
+    comparisonSelectedClues: []
   })
 
   const currentCase = computed(() => {
@@ -275,9 +277,12 @@ export const useGameStore = defineStore('game', () => {
       intelligenceState: createInitialIntelligenceState(),
       mailDeliveryEvents: JSON.parse(JSON.stringify(caseDeliveryEvents)),
       spiritualPollution: createInitialPollutionState(),
-      annotations: [],
-      comparisons: [],
-      credibilityMarks: []
+      clueAnnotations: [],
+      clueConfidences: [],
+      clueComparisons: [],
+      deductionHints: [],
+      comparisonMode: false,
+      comparisonSelectedClues: []
     }
 
     startTimer()
@@ -2319,223 +2324,334 @@ export const useGameStore = defineStore('game', () => {
       intelligenceState: createInitialIntelligenceState(),
       mailDeliveryEvents: [],
       spiritualPollution: createInitialPollutionState(),
-      annotations: [],
-      comparisons: [],
-      credibilityMarks: []
+      clueAnnotations: [],
+      clueConfidences: [],
+      clueComparisons: [],
+      deductionHints: [],
+      comparisonMode: false,
+      comparisonSelectedClues: []
     }
   }
 
-  function addAnnotation(clueId: string, content: string, type: ClueAnnotation['type'] = 'note'): ClueAnnotation {
+  function generateAnalysisId(): string {
+    return `id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  }
+
+  function addClueAnnotation(clueId: string, content: string, type: AnnotationType = 'note'): ClueAnnotation {
     const annotation: ClueAnnotation = {
-      id: `ann-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      id: generateAnalysisId(),
       clueId,
       content,
+      type,
       createdAt: Date.now(),
-      updatedAt: Date.now(),
-      type
+      updatedAt: Date.now()
     }
-    gameState.value.annotations.push(annotation)
-    addLog('analysis', `添加批注[${type}]：${content.slice(0, 30)}`)
+    gameState.value.clueAnnotations.push(annotation)
+    addLog('analysis', `添加线索批注：${content.slice(0, 30)}${content.length > 30 ? '...' : ''}`)
+    generateDeductionHints()
     return annotation
   }
 
-  function removeAnnotation(annotationId: string) {
-    gameState.value.annotations = gameState.value.annotations.filter(a => a.id !== annotationId)
+  function updateClueAnnotation(annotationId: string, content: string, type?: AnnotationType): boolean {
+    const annotation = gameState.value.clueAnnotations.find(a => a.id === annotationId)
+    if (!annotation) return false
+    annotation.content = content
+    if (type) annotation.type = type
+    annotation.updatedAt = Date.now()
+    addLog('analysis', `更新线索批注`)
+    generateDeductionHints()
+    return true
   }
 
-  function updateAnnotation(annotationId: string, content: string) {
-    const ann = gameState.value.annotations.find(a => a.id === annotationId)
-    if (ann) {
-      ann.content = content
-      ann.updatedAt = Date.now()
-    }
+  function deleteClueAnnotation(annotationId: string): boolean {
+    const index = gameState.value.clueAnnotations.findIndex(a => a.id === annotationId)
+    if (index === -1) return false
+    gameState.value.clueAnnotations.splice(index, 1)
+    addLog('analysis', `删除线索批注`)
+    generateDeductionHints()
+    return true
   }
 
   function getAnnotationsForClue(clueId: string): ClueAnnotation[] {
-    return gameState.value.annotations.filter(a => a.clueId === clueId)
+    return gameState.value.clueAnnotations.filter(a => a.clueId === clueId)
   }
 
-  function compareClues(clue1Id: string, clue2Id: string, notes: string = ''): ClueComparison {
-    const existing = gameState.value.comparisons.find(
+  function setClueConfidence(clueId: string, confidence: number, reasoning: string = '', tags: string[] = []): ClueConfidence {
+    const existing = gameState.value.clueConfidences.find(c => c.clueId === clueId)
+    if (existing) {
+      existing.confidence = Math.max(0, Math.min(100, confidence))
+      existing.reasoning = reasoning
+      existing.tags = tags
+      existing.taggedAt = Date.now()
+      addLog('analysis', `更新线索可信度：${confidence}%`)
+      generateDeductionHints()
+      return existing
+    }
+    const confidenceEntry: ClueConfidence = {
+      clueId,
+      confidence: Math.max(0, Math.min(100, confidence)),
+      reasoning,
+      taggedAt: Date.now(),
+      tags,
+      evidenceSupporting: [],
+      evidenceContradicting: []
+    }
+    gameState.value.clueConfidences.push(confidenceEntry)
+    addLog('analysis', `标记线索可信度：${confidence}%`)
+    generateDeductionHints()
+    return confidenceEntry
+  }
+
+  function getClueConfidence(clueId: string): ClueConfidence | undefined {
+    return gameState.value.clueConfidences.find(c => c.clueId === clueId)
+  }
+
+  function getAverageConfidenceForClues(clueIds: string[]): number {
+    if (clueIds.length === 0) return 50
+    const confidences = clueIds
+      .map(id => getClueConfidence(id)?.confidence ?? 50)
+    return confidences.reduce((a, b) => a + b, 0) / confidences.length
+  }
+
+  function toggleComparisonMode(): boolean {
+    gameState.value.comparisonMode = !gameState.value.comparisonMode
+    if (!gameState.value.comparisonMode) {
+      gameState.value.comparisonSelectedClues = []
+    }
+    return gameState.value.comparisonMode
+  }
+
+  function toggleComparisonClue(clueId: string): string[] {
+    if (!gameState.value.comparisonMode) return []
+    const index = gameState.value.comparisonSelectedClues.indexOf(clueId)
+    if (index > -1) {
+      gameState.value.comparisonSelectedClues.splice(index, 1)
+    } else if (gameState.value.comparisonSelectedClues.length < 2) {
+      gameState.value.comparisonSelectedClues.push(clueId)
+    }
+    return gameState.value.comparisonSelectedClues
+  }
+
+  function createClueComparison(clue1Id: string, clue2Id: string, similarities: string[], differences: string[], conclusion: string, supportsConnection: boolean, connectionConfidence: number): ClueComparison {
+    const existing = gameState.value.clueComparisons.find(
       c => (c.clue1Id === clue1Id && c.clue2Id === clue2Id) ||
            (c.clue1Id === clue2Id && c.clue2Id === clue1Id)
     )
     if (existing) {
-      existing.notes = notes || existing.notes
-      existing.createdAt = Date.now()
+      existing.similarities = similarities
+      existing.differences = differences
+      existing.conclusion = conclusion
+      existing.supportsConnection = supportsConnection
+      existing.connectionConfidence = Math.max(0, Math.min(100, connectionConfidence))
+      existing.updatedAt = Date.now()
+      addLog('analysis', `更新线索比对：${getClueById(clue1Id)?.name || clue1Id} ↔ ${getClueById(clue2Id)?.name || clue2Id}`)
+      generateDeductionHints()
       return existing
     }
-
-    const caseData = currentCase.value
-    const clue1 = caseData?.clues.find(c => c.id === clue1Id)
-    const clue2 = caseData?.clues.find(c => c.id === clue2Id)
-
-    let similarity = 0
-    let conflict = false
-
-    if (clue1 && clue2) {
-      const sharedConnections = clue1.connections.filter(id => clue2.connections.includes(id))
-      similarity = Math.min(100, Math.round((sharedConnections.length / Math.max(clue1.connections.length, clue2.connections.length, 1)) * 100))
-
-      if (clue1.type === clue2.type && clue1.source !== clue2.source) {
-        similarity += 10
-      }
-      if (clue1.importance >= 4 && clue2.importance >= 4) {
-        similarity += 15
-      }
-
-      const isFake1 = isFakeClue(clue1Id)
-      const isFake2 = isFakeClue(clue2Id)
-      if (isFake1 || isFake2) {
-        conflict = true
-        similarity = Math.max(0, similarity - 30)
-      }
-
-      const mark1 = gameState.value.credibilityMarks.find(m => m.clueId === clue1Id)
-      const mark2 = gameState.value.credibilityMarks.find(m => m.clueId === clue2Id)
-      if (mark1 && mark2) {
-        if ((mark1.level === 'verified' && mark2.level === 'contradicted') ||
-            (mark1.level === 'contradicted' && mark2.level === 'verified')) {
-          conflict = true
-          similarity = Math.max(0, similarity - 40)
+    const comparison: ClueComparison = {
+      id: generateAnalysisId(),
+      clue1Id,
+      clue2Id,
+      similarities,
+      differences,
+      conclusion,
+      supportsConnection,
+      connectionConfidence: Math.max(0, Math.min(100, connectionConfidence)),
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+    gameState.value.clueComparisons.push(comparison)
+    addLog('analysis', `创建线索比对：${getClueById(clue1Id)?.name || clue1Id} ↔ ${getClueById(clue2Id)?.name || clue2Id}`)
+    
+    if (supportsConnection) {
+      const existingConnection = gameState.value.clueConnections.find(
+        c => (c.clue1Id === clue1Id && c.clue2Id === clue2Id) ||
+             (c.clue1Id === clue2Id && c.clue2Id === clue1Id)
+      )
+      if (existingConnection) {
+        existingConnection.confidence = Math.max(existingConnection.confidence || 50, connectionConfidence)
+        if (!existingConnection.supportedBy) existingConnection.supportedBy = []
+        if (!existingConnection.supportedBy.includes(comparison.id)) {
+          existingConnection.supportedBy.push(comparison.id)
         }
       }
     }
-
-    similarity = Math.min(100, similarity)
-
-    const comparison: ClueComparison = {
-      id: `cmp-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      clue1Id,
-      clue2Id,
-      similarity,
-      conflict,
-      notes,
-      createdAt: Date.now()
-    }
-    gameState.value.comparisons.push(comparison)
-    addLog('analysis', `比对线索：${clue1Id} ↔ ${clue2Id}（相似度 ${similarity}%${conflict ? '，存在矛盾' : ''}）`)
-    updateDeductionCompleteness()
+    
+    generateDeductionHints()
     return comparison
   }
 
+  function deleteClueComparison(comparisonId: string): boolean {
+    const index = gameState.value.clueComparisons.findIndex(c => c.id === comparisonId)
+    if (index === -1) return false
+    gameState.value.clueComparisons.splice(index, 1)
+    addLog('analysis', `删除线索比对`)
+    generateDeductionHints()
+    return true
+  }
+
   function getComparisonsForClue(clueId: string): ClueComparison[] {
-    return gameState.value.comparisons.filter(
+    return gameState.value.clueComparisons.filter(
       c => c.clue1Id === clueId || c.clue2Id === clueId
     )
   }
 
-  function setCredibilityMark(clueId: string, level: CredibilityLevel, reason?: string): CredibilityMark {
-    const existing = gameState.value.credibilityMarks.find(m => m.clueId === clueId)
-    if (existing) {
-      existing.level = level
-      existing.markedAt = Date.now()
-      existing.reason = reason
-      addLog('analysis', `更新可信度：${clueId} → ${CREDIBILITY_LEVELS[level].description}${reason ? `（${reason}）` : ''}`)
-    } else {
-      const mark: CredibilityMark = {
-        clueId,
-        level,
-        markedAt: Date.now(),
-        reason
-      }
-      gameState.value.credibilityMarks.push(mark)
-      addLog('analysis', `标记可信度：${clueId} → ${CREDIBILITY_LEVELS[level].description}${reason ? `（${reason}）` : ''}`)
-    }
-    updateDeductionCompleteness()
-    return gameState.value.credibilityMarks.find(m => m.clueId === clueId)!
-  }
-
-  function getCredibilityMark(clueId: string): CredibilityMark | undefined {
-    return gameState.value.credibilityMarks.find(m => m.clueId === clueId)
-  }
-
-  function getCredibilityLevel(clueId: string): CredibilityLevel {
-    const mark = getCredibilityMark(clueId)
-    return mark?.level || 'uncertain'
-  }
-
-  function getConnectionSuccessModifier(clue1Id: string, clue2Id: string): number {
-    const level1 = getCredibilityLevel(clue1Id)
-    const level2 = getCredibilityLevel(clue2Id)
-    const effect1 = CREDIBILITY_LEVELS[level1]
-    const effect2 = CREDIBILITY_LEVELS[level2]
-    return effect1.connectionSuccessModifier + effect2.connectionSuccessModifier
-  }
-
-  function getTotalDeductionHintBonus(): number {
-    return gameState.value.credibilityMarks.reduce((sum, mark) => {
-      return sum + CREDIBILITY_LEVELS[mark.level].deductionHintBonus
-    }, 0)
-  }
-
-  function getVerifiedClueCount(): number {
-    return gameState.value.credibilityMarks.filter(m => m.level === 'verified' || m.level === 'reliable').length
-  }
-
-  function getSuspectClueCount(): number {
-    return gameState.value.credibilityMarks.filter(m => m.level === 'suspect' || m.level === 'contradicted').length
-  }
-
-  function getAnnotationConnectionBonus(clueId: string): number {
-    const annotations = getAnnotationsForClue(clueId)
-    let bonus = 0
-    annotations.forEach(ann => {
-      switch (ann.type) {
-        case 'insight': bonus += 0.05; break
-        case 'highlight': bonus += 0.03; break
-        case 'note': bonus += 0.02; break
-        case 'question': bonus += 0.01; break
-      }
-    })
-    return bonus
-  }
-
-  function getComparisonConnectionBonus(clue1Id: string, clue2Id: string): number {
-    const comp = gameState.value.comparisons.find(
+  function getComparisonBetween(clue1Id: string, clue2Id: string): ClueComparison | undefined {
+    return gameState.value.clueComparisons.find(
       c => (c.clue1Id === clue1Id && c.clue2Id === clue2Id) ||
            (c.clue1Id === clue2Id && c.clue2Id === clue1Id)
     )
-    if (!comp) return 0
-    if (comp.conflict) return -0.1
-    return comp.similarity * 0.001
   }
 
-  function calculateConnectionSuccessRate(clue1Id: string, clue2Id: string): { rate: number; breakdown: string[] } {
-    const breakdown: string[] = []
-    let rate = 0.5
-
-    const credibilityMod = getConnectionSuccessModifier(clue1Id, clue2Id)
-    rate += credibilityMod
-    if (credibilityMod !== 0) {
-      const level1 = getCredibilityLevel(clue1Id)
-      const level2 = getCredibilityLevel(clue2Id)
-      breakdown.push(`可信度修正(${CREDIBILITY_LEVELS[level1].description}+${CREDIBILITY_LEVELS[level2].description}): ${credibilityMod > 0 ? '+' : ''}${Math.round(credibilityMod * 100)}%`)
+  function getConnectionSuccessRate(clue1Id: string, clue2Id: string): number {
+    let baseRate = 50
+    
+    const comparison = getComparisonBetween(clue1Id, clue2Id)
+    if (comparison) {
+      if (comparison.supportsConnection) {
+        baseRate = Math.max(baseRate, comparison.connectionConfidence)
+      } else {
+        baseRate = Math.min(baseRate, 100 - comparison.connectionConfidence)
+      }
     }
-
-    const annBonus1 = getAnnotationConnectionBonus(clue1Id)
-    const annBonus2 = getAnnotationConnectionBonus(clue2Id)
-    const totalAnnBonus = annBonus1 + annBonus2
-    if (totalAnnBonus > 0) {
-      rate += totalAnnBonus
-      breakdown.push(`批注加成: +${Math.round(totalAnnBonus * 100)}%`)
+    
+    const avgConfidence = getAverageConfidenceForClues([clue1Id, clue2Id])
+    const confidenceBonus = (avgConfidence - 50) * 0.3
+    baseRate += confidenceBonus
+    
+    const clue1 = getClueById(clue1Id)
+    const clue2 = getClueById(clue2Id)
+    if (clue1 && clue2) {
+      if (clue1.connections.includes(clue2Id) || clue2.connections.includes(clue1Id)) {
+        baseRate += 15
+      }
+      const typeMatchBonus = clue1.type === clue2.type ? 10 : 0
+      baseRate += typeMatchBonus
     }
-
-    const compBonus = getComparisonConnectionBonus(clue1Id, clue2Id)
-    if (compBonus !== 0) {
-      rate += compBonus
-      breakdown.push(`比对修正: ${compBonus > 0 ? '+' : ''}${Math.round(compBonus * 100)}%`)
-    }
-
-    rate = Math.min(0.95, Math.max(0.05, rate))
-    return { rate, breakdown }
+    
+    const annotations1 = getAnnotationsForClue(clue1Id)
+    const annotations2 = getAnnotationsForClue(clue2Id)
+    const annotationBonus = Math.min((annotations1.length + annotations2.length) * 3, 15)
+    baseRate += annotationBonus
+    
+    return Math.max(10, Math.min(95, Math.round(baseRate)))
   }
 
-  const modifiedDeductionInfoCompleteness = computed(() => {
-    const base = gameState.value.intelligenceState.deductionInfoCompleteness
-    const hintBonus = getTotalDeductionHintBonus()
-    return Math.min(100, Math.max(0, base + hintBonus))
-  })
+  function generateDeductionHints(): DeductionHint[] {
+    const hints: DeductionHint[] = []
+    const now = Date.now()
+    
+    gameState.value.clueComparisons.forEach(comparison => {
+      if (comparison.supportsConnection && comparison.connectionConfidence >= 70) {
+        const exists = gameState.value.clueConnections.some(
+          c => (c.clue1Id === comparison.clue1Id && c.clue2Id === comparison.clue2Id) ||
+               (c.clue1Id === comparison.clue2Id && c.clue2Id === comparison.clue1Id)
+        )
+        if (!exists) {
+          hints.push({
+            id: generateAnalysisId(),
+            type: 'suggestion',
+            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能存在关联（可信度 ${comparison.connectionConfidence}%）`,
+            relatedClues: [comparison.clue1Id, comparison.clue2Id],
+            priority: comparison.connectionConfidence,
+            source: 'comparison',
+            createdAt: now
+          })
+        }
+      }
+      
+      if (!comparison.supportsConnection && comparison.connectionConfidence >= 60) {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'warning',
+          content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联`,
+          relatedClues: [comparison.clue1Id, comparison.clue2Id],
+          priority: comparison.connectionConfidence,
+          source: 'comparison',
+          createdAt: now
+        })
+      }
+    })
+    
+    gameState.value.clueConfidences.forEach(conf => {
+      if (conf.confidence <= 30) {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'warning',
+          content: `「${getClueById(conf.clueId)?.name}」的可信度较低（${conf.confidence}%），${conf.reasoning || '需要进一步验证'}`,
+          relatedClues: [conf.clueId],
+          priority: 100 - conf.confidence,
+          source: 'confidence',
+          createdAt: now
+        })
+      }
+      if (conf.confidence >= 80) {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'insight',
+          content: `「${getClueById(conf.clueId)?.name}」可信度很高（${conf.confidence}%），${conf.reasoning || '可作为核心推理依据'}`,
+          relatedClues: [conf.clueId],
+          priority: conf.confidence,
+          source: 'confidence',
+          createdAt: now
+        })
+      }
+    })
+    
+    gameState.value.clueAnnotations.forEach(annotation => {
+      if (annotation.type === 'contradiction') {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'contradiction',
+          content: `「${getClueById(annotation.clueId)?.name}」存在矛盾：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
+          relatedClues: [annotation.clueId],
+          priority: 80,
+          source: 'annotation',
+          createdAt: now
+        })
+      }
+      if (annotation.type === 'hypothesis') {
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'suggestion',
+          content: `假设：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
+          relatedClues: [annotation.clueId],
+          priority: 50,
+          source: 'annotation',
+          createdAt: now
+        })
+      }
+    })
+    
+    const analyzedCount = gameState.value.analyzedClues.length
+    const confidenceCount = gameState.value.clueConfidences.length
+    if (analyzedCount >= 3 && confidenceCount < analyzedCount * 0.5) {
+      hints.push({
+        id: generateAnalysisId(),
+        type: 'suggestion',
+        content: `建议为已分析的线索标记可信度，这将提高连线成功率和推演准确性`,
+        relatedClues: [],
+        priority: 60,
+        source: 'pattern',
+        createdAt: now
+      })
+    }
+    
+    gameState.value.deductionHints = hints.sort((a, b) => b.priority - a.priority)
+    return hints
+  }
+
+  function getDeductionHints(limit?: number): DeductionHint[] {
+    const hints = gameState.value.deductionHints
+    return limit ? hints.slice(0, limit) : hints
+  }
+
+  function dismissDeductionHint(hintId: string): boolean {
+    const index = gameState.value.deductionHints.findIndex(h => h.id === hintId)
+    if (index === -1) return false
+    gameState.value.deductionHints.splice(index, 1)
+    return true
+  }
 
   return {
     gameState,
@@ -2565,7 +2681,6 @@ export const useGameStore = defineStore('game', () => {
     nextPhase,
     overallProgress,
     deductionInfoCompleteness,
-    modifiedDeductionInfoCompleteness,
     spiritualPollution,
     totalPollution,
     shockTier,
@@ -2642,21 +2757,22 @@ export const useGameStore = defineStore('game', () => {
     checkSceneUnlockConditionsForAll,
     getSceneUnlockConditionProgress,
     resetGame,
-    addAnnotation,
-    removeAnnotation,
-    updateAnnotation,
+    addClueAnnotation,
+    updateClueAnnotation,
+    deleteClueAnnotation,
     getAnnotationsForClue,
-    compareClues,
+    setClueConfidence,
+    getClueConfidence,
+    getAverageConfidenceForClues,
+    toggleComparisonMode,
+    toggleComparisonClue,
+    createClueComparison,
+    deleteClueComparison,
     getComparisonsForClue,
-    setCredibilityMark,
-    getCredibilityMark,
-    getCredibilityLevel,
-    getConnectionSuccessModifier,
-    getTotalDeductionHintBonus,
-    getVerifiedClueCount,
-    getSuspectClueCount,
-    getAnnotationConnectionBonus,
-    getComparisonConnectionBonus,
-    calculateConnectionSuccessRate
+    getComparisonBetween,
+    getConnectionSuccessRate,
+    generateDeductionHints,
+    getDeductionHints,
+    dismissDeductionHint
   }
 })

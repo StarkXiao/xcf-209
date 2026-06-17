@@ -2,15 +2,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useClueGraphStore } from '@/stores/clueGraph'
-import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
 import { RELATIONSHIP_TYPES } from '@/types'
-import type { GraphNode, GraphEdge, RelationshipType, CredibilityLevel } from '@/types'
+import type { GraphNode, GraphEdge, RelationshipType } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
 const clueGraphStore = useClueGraphStore()
-const gameStore = useGameStore()
 
 const canvasRef = ref<HTMLDivElement | null>(null)
 const svgRef = ref<SVGSVGElement | null>(null)
@@ -24,9 +22,6 @@ const connectionTargetId = ref<string | null>(null)
 const selectedRelationship = ref<RelationshipType>('related_to')
 const showImportModal = ref(false)
 const importJson = ref('')
-
-const confirmResult = ref<{ success: boolean; rate: number; roll: number; breakdown: string[] } | null>(null)
-const showConfirmResult = ref(false)
 
 const mousePos = ref({ x: 0, y: 0 })
 
@@ -59,17 +54,6 @@ const selectedEdge = computed(() =>
 const connectingNode = computed(() => 
   connectingFrom.value ? nodes.value.find(n => n.id === connectingFrom.value) : null
 )
-
-const pendingConnectionRate = computed(() => {
-  if (!connectingFrom.value || !connectionTargetId.value) return null
-  return gameStore.calculateConnectionSuccessRate(connectingFrom.value, connectionTargetId.value)
-})
-
-const selectedEdgeRate = computed(() => {
-  if (!selectedEdge.value) return null
-  if (selectedEdge.value.confirmed) return null
-  return gameStore.calculateConnectionSuccessRate(selectedEdge.value.sourceId, selectedEdge.value.targetId)
-})
 
 const errors = computed(() => validationResult.value?.errors || [])
 const warnings = computed(() => validationResult.value?.warnings || [])
@@ -304,12 +288,7 @@ function getEdgeLabelPosition(edge: GraphEdge): { x: number; y: number } {
 
 function confirmSelectedEdge() {
   if (selectedEdgeId.value) {
-    const result = clueGraphStore.confirmEdge(selectedEdgeId.value)
-    confirmResult.value = result
-    showConfirmResult.value = true
-    setTimeout(() => {
-      showConfirmResult.value = false
-    }, 4000)
+    clueGraphStore.confirmEdge(selectedEdgeId.value)
   }
 }
 
@@ -456,27 +435,6 @@ function getNodeBorderColor(node: GraphNode): string {
   if (node.id === connectionTargetId.value) return '#4caf50'
   return node.color || '#6b4c9a'
 }
-
-function getNodeCredibilityLevel(nodeId: string): CredibilityLevel {
-  return gameStore.getCredibilityLevel(nodeId)
-}
-
-function getNodeCredibilityColor(nodeId: string): string {
-  const level = getNodeCredibilityLevel(nodeId)
-  const colors: Record<CredibilityLevel, string> = {
-    verified: '#4caf50',
-    reliable: '#2196f3',
-    uncertain: 'transparent',
-    suspect: '#ff9800',
-    contradicted: '#f44336'
-  }
-  return colors[level]
-}
-
-function getNodeAnnotationCount(nodeId: string): number {
-  return gameStore.getAnnotationsForClue(nodeId).length
-}
-
 </script>
 
 <template>
@@ -668,17 +626,9 @@ function getNodeAnnotationCount(nodeId: string): number {
               <div class="node-header" :style="{ backgroundColor: node.color }">
                 <span class="node-type">{{ getNodeTypeLabel(node.type) }}</span>
                 <span v-if="node.importance" class="node-importance">{{ node.importance }}</span>
-                <span 
-                  v-if="getNodeCredibilityLevel(node.id) !== 'uncertain'"
-                  class="node-credibility-dot"
-                  :style="{ backgroundColor: getNodeCredibilityColor(node.id) }"
-                ></span>
               </div>
               <div class="node-body">
                 <div class="node-title">{{ node.label }}</div>
-                <div v-if="getNodeAnnotationCount(node.id) > 0" class="node-annotation-count">
-                  📝 {{ getNodeAnnotationCount(node.id) }}
-                </div>
               </div>
               <div class="node-actions">
                 <button 
@@ -849,36 +799,6 @@ function getNodeAnnotationCount(nodeId: string): number {
                   {{ selectedEdge?.confirmed ? '✓ 已确认' : '⏳ 待确认' }}
                 </span>
               </div>
-              <div v-if="!selectedEdge?.confirmed && selectedEdgeRate" class="detail-row full">
-                <span class="detail-label">确认成功率</span>
-                <div class="success-rate-mini">
-                  <div class="success-rate-track mini">
-                    <div 
-                      class="success-rate-fill"
-                      :style="{ width: `${selectedEdgeRate.rate * 100}%` }"
-                      :class="{ 
-                        'rate-high': selectedEdgeRate.rate >= 0.7, 
-                        'rate-mid': selectedEdgeRate.rate >= 0.4 && selectedEdgeRate.rate < 0.7,
-                        'rate-low': selectedEdgeRate.rate < 0.4 
-                      }"
-                    ></div>
-                  </div>
-                  <span class="success-rate-pct">{{ Math.round(selectedEdgeRate.rate * 100) }}%</span>
-                </div>
-                <div v-if="selectedEdgeRate.breakdown.length > 0" class="rate-breakdown-mini">
-                  <div v-for="(line, i) in selectedEdgeRate.breakdown" :key="i" class="rate-breakdown-line">
-                    {{ line }}
-                  </div>
-                </div>
-              </div>
-              <div v-if="selectedEdge?.confirmAttempts && selectedEdge.confirmAttempts > 0" class="detail-row">
-                <span class="detail-label">确认尝试</span>
-                <span class="detail-value">{{ selectedEdge.confirmAttempts }}次</span>
-              </div>
-              <div v-if="selectedEdge?.lastConfirmResult === 'failure'" class="detail-row">
-                <span class="detail-label">上次结果</span>
-                <span class="detail-value unconfirmed">✗ 确认失败</span>
-              </div>
               <div v-if="selectedEdge?.isError" class="detail-row full">
                 <span class="detail-label error">错误</span>
                 <p class="error-message">{{ selectedEdge?.errorMessage }}</p>
@@ -889,7 +809,7 @@ function getNodeAnnotationCount(nodeId: string): number {
                   class="detail-btn primary" 
                   @click="confirmSelectedEdge"
                 >
-                  ✓ 确认关系{{ selectedEdgeRate ? ` (${Math.round(selectedEdgeRate.rate * 100)}%)` : '' }}
+                  ✓ 确认关系
                 </button>
                 <button class="detail-btn danger" @click="deleteSelectedEdge">
                   🗑️ 删除连接
@@ -969,29 +889,6 @@ function getNodeAnnotationCount(nodeId: string): number {
           </div>
         </div>
 
-        <div v-if="pendingConnectionRate" class="success-rate-preview">
-          <div class="success-rate-bar">
-            <div class="success-rate-label">预估确认成功率</div>
-            <div class="success-rate-value">{{ Math.round(pendingConnectionRate.rate * 100) }}%</div>
-          </div>
-          <div class="success-rate-track">
-            <div 
-              class="success-rate-fill"
-              :style="{ width: `${pendingConnectionRate.rate * 100}%` }"
-              :class="{ 
-                'rate-high': pendingConnectionRate.rate >= 0.7, 
-                'rate-mid': pendingConnectionRate.rate >= 0.4 && pendingConnectionRate.rate < 0.7,
-                'rate-low': pendingConnectionRate.rate < 0.4 
-              }"
-            ></div>
-          </div>
-          <div v-if="pendingConnectionRate.breakdown.length > 0" class="rate-breakdown">
-            <div v-for="(line, i) in pendingConnectionRate.breakdown" :key="i" class="rate-breakdown-line">
-              {{ line }}
-            </div>
-          </div>
-        </div>
-
         <div class="modal-actions">
           <button class="modal-btn" @click="cancelConnectionModal">取消</button>
           <button class="modal-btn primary" @click="confirmConnection">确认连接</button>
@@ -1017,20 +914,6 @@ function getNodeAnnotationCount(nodeId: string): number {
         </div>
       </div>
     </div>
-
-    <Transition name="toast">
-      <div v-if="showConfirmResult && confirmResult" class="confirm-result-toast" :class="confirmResult.success ? 'success' : 'failure'">
-        <div class="toast-icon">{{ confirmResult.success ? '✓' : '✗' }}</div>
-        <div class="toast-body">
-          <div class="toast-title">{{ confirmResult.success ? '连线确认成功！' : '连线确认失败' }}</div>
-          <div class="toast-detail">成功率 {{ Math.round(confirmResult.rate * 100) }}% · 掷骰 {{ Math.round(confirmResult.roll * 100) }}</div>
-          <div v-if="confirmResult.breakdown.length > 0" class="toast-breakdown">
-            <span v-for="(line, i) in confirmResult.breakdown.slice(0, 3)" :key="i">{{ line }}</span>
-          </div>
-        </div>
-        <button class="toast-close" @click="showConfirmResult = false">✕</button>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -1270,19 +1153,6 @@ function getRelationshipIcon(rel: string): string {
   padding: 0.1rem 0.35rem;
   border-radius: 8px;
   font-size: 0.65rem;
-}
-
-.node-credibility-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.node-annotation-count {
-  font-size: 0.65rem;
-  color: var(--color-accent-light);
-  margin-top: 0.1rem;
 }
 
 .node-body {
@@ -1837,186 +1707,5 @@ function getRelationshipIcon(rel: string): string {
   .relationship-options {
     grid-template-columns: 1fr;
   }
-}
-
-.success-rate-preview {
-  margin-top: 1rem;
-  padding: 0.75rem;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-}
-
-.success-rate-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.success-rate-label {
-  font-size: 0.8rem;
-  color: var(--color-text-dim);
-}
-
-.success-rate-value {
-  font-size: 1rem;
-  font-weight: bold;
-  color: var(--color-text);
-}
-
-.success-rate-track {
-  height: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 0.5rem;
-}
-
-.success-rate-track.mini {
-  flex: 1;
-  height: 6px;
-  margin-bottom: 0;
-  margin-right: 0.5rem;
-}
-
-.success-rate-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s ease;
-}
-
-.success-rate-fill.rate-high {
-  background: linear-gradient(90deg, #4caf50, #66bb6a);
-}
-
-.success-rate-fill.rate-mid {
-  background: linear-gradient(90deg, #ff9800, #ffa726);
-}
-
-.success-rate-fill.rate-low {
-  background: linear-gradient(90deg, #f44336, #ef5350);
-}
-
-.rate-breakdown {
-  border-top: 1px solid var(--color-border);
-  padding-top: 0.5rem;
-}
-
-.rate-breakdown-line {
-  font-size: 0.7rem;
-  color: var(--color-text-dim);
-  line-height: 1.5;
-}
-
-.rate-breakdown-mini {
-  margin-top: 0.3rem;
-}
-
-.success-rate-mini {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.3rem;
-}
-
-.success-rate-pct {
-  font-size: 0.85rem;
-  font-weight: bold;
-  color: var(--color-text);
-  min-width: 3rem;
-  text-align: right;
-}
-
-.confirm-result-toast {
-  position: fixed;
-  top: 1.5rem;
-  right: 1.5rem;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem 1.25rem;
-  border-radius: 10px;
-  z-index: 1000;
-  max-width: 380px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-
-.confirm-result-toast.success {
-  background: linear-gradient(135deg, rgba(58, 139, 90, 0.95), rgba(76, 175, 80, 0.9));
-  border: 1px solid #66bb6a;
-}
-
-.confirm-result-toast.failure {
-  background: linear-gradient(135deg, rgba(139, 58, 58, 0.95), rgba(244, 67, 54, 0.9));
-  border: 1px solid #ef5350;
-}
-
-.toast-icon {
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: white;
-  line-height: 1;
-}
-
-.toast-body {
-  flex: 1;
-}
-
-.toast-title {
-  font-size: 0.95rem;
-  font-weight: bold;
-  color: white;
-  margin-bottom: 0.25rem;
-}
-
-.toast-detail {
-  font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.toast-breakdown {
-  margin-top: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
-.toast-breakdown span {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.toast-close {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 0.1rem 0.3rem;
-  border-radius: 4px;
-}
-
-.toast-close:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
-}
-
-.toast-enter-active {
-  transition: all 0.3s ease-out;
-}
-
-.toast-leave-active {
-  transition: all 0.3s ease-in;
-}
-
-.toast-enter-from {
-  opacity: 0;
-  transform: translateX(30px);
-}
-
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(30px);
 }
 </style>
