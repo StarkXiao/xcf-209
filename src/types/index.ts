@@ -548,3 +548,102 @@ export interface AnomalyState {
   lastAnomalyCheck: number
   anomalyCooldowns: Record<string, number>
 }
+
+export type BestiaryCategory = 'creature' | 'forbidden_item' | 'organization'
+
+export type RarityLevel = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary'
+
+export interface BestiaryUnlockCondition {
+  type: 'evidence_discovered' | 'clue_discovered' | 'clue_analyzed' | 'case_completed' | 'branch_unlocked' | 'evidence_special' | 'sanity_under_threshold'
+  requiredId?: string
+  requiredCount?: number
+  threshold?: number
+  description: string
+}
+
+export interface Creature {
+  id: string
+  name: string
+  category: 'creature'
+  icon: string
+  rarity: RarityLevel
+  threatLevel: 1 | 2 | 3 | 4 | 5
+  description: string
+  appearance: string
+  behavior: string
+  abilities: string[]
+  weaknesses: string[]
+  sightings: string[]
+  sanityEffect: number
+  firstSightedCaseId?: string
+  relatedOrganizations: string[]
+  unlockConditions: BestiaryUnlockCondition[]
+  discovered: boolean
+  discoveredAt?: number
+  discoveryCaseId?: string
+  loreNotes: string[]
+}
+
+export interface ForbiddenItem {
+  id: string
+  name: string
+  category: 'forbidden_item'
+  icon: string
+  rarity: RarityLevel
+  dangerLevel: 1 | 2 | 3 | 4 | 5
+  description: string
+  physicalTraits: string
+  effects: string[]
+  containmentProtocols: string[]
+  knownOrigins: string[]
+  sanityEffect: number
+  firstDiscoveredCaseId?: string
+  relatedCreatures: string[]
+  relatedOrganizations: string[]
+  unlockConditions: BestiaryUnlockCondition[]
+  discovered: boolean
+  discoveredAt?: number
+  discoveryCaseId?: string
+  loreNotes: string[]
+}
+
+export interface Organization {
+  id: string
+  name: string
+  category: 'organization'
+  icon: string
+  rarity: RarityLevel
+  influenceLevel: 1 | 2 | 3 | 4 | 5
+  description: string
+  history: string
+  goals: string[]
+  knownMembers: string[]
+  headquarters: string
+  resources: string[]
+  alliedOrganizations: string[]
+  opposingOrganizations: string[]
+  firstEncounteredCaseId?: string
+  relatedCreatures: string[]
+  relatedItems: string[]
+  unlockConditions: BestiaryUnlockCondition[]
+  discovered: boolean
+  discoveredAt?: number
+  discoveryCaseId?: string
+  loreNotes: string[]
+}
+
+export type BestiaryEntry = Creature | ForbiddenItem | Organization
+
+export interface BestiaryProgress {
+  discoveredCreatures: string[]
+  discoveredItems: string[]
+  discoveredOrganizations: string[]
+  totalDiscovered: number
+  discoveryLog: {
+    entryId: string
+    category: BestiaryCategory
+    discoveredAt: number
+    caseId: string
+    unlockMethod: string
+  }[]
+}

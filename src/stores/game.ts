@@ -6,6 +6,7 @@ import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSani
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { useInventoryStore } from './inventory'
+import { useBestiaryStore } from './bestiary'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 import { 
   getAvailableAnomalyEvents, 
@@ -269,6 +270,9 @@ export const useGameStore = defineStore('game', () => {
       checkAnomalyEvents()
     }
 
+    const bestiaryStore = useBestiaryStore()
+    bestiaryStore.checkAndUnlockOnSanityChange(gameState.value.sanity)
+
     if (gameState.value.sanity <= 0) {
       return 'insane'
     }
@@ -451,6 +455,9 @@ export const useGameStore = defineStore('game', () => {
 
     getInventoryStore().checkAndUnlockRecipes()
 
+    const bestiaryStore = useBestiaryStore()
+    bestiaryStore.checkAndUnlockOnEvidence(evidenceId)
+
     return true
   }
 
@@ -460,6 +467,10 @@ export const useGameStore = defineStore('game', () => {
     gameState.value.discoveredClues.push(clueId)
     addLog('discovery', `获得新线索：${clueId}`)
     getInventoryStore().checkAndUnlockRecipes()
+    
+    const bestiaryStore = useBestiaryStore()
+    bestiaryStore.checkAndUnlockOnClue(clueId, false)
+    
     return true
   }
 
@@ -557,6 +568,9 @@ export const useGameStore = defineStore('game', () => {
       logMessage += ` [自动建立关联]`
     }
     addLog('analysis', logMessage)
+    
+    const bestiaryStore = useBestiaryStore()
+    bestiaryStore.checkAndUnlockOnClue(clueId, true)
     
     checkEvidenceRefresh('after_analyze_clue', { clueId })
     

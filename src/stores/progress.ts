@@ -4,6 +4,7 @@ import type { CaseProgress, CaseRewards, CaseScoreBreakdown, PlayRecord } from '
 import { cases, getCaseById, setCaseStatus } from '@/data/cases'
 import { useGameStore } from './game'
 import { useSaveStore } from './save'
+import { useBestiaryStore } from './bestiary'
 
 const STORAGE_KEY = 'cthulhu-case-progress'
 
@@ -194,6 +195,9 @@ export const useProgressStore = defineStore('progress', () => {
         saveStore.unlockGlobalTool(toolId)
       })
     }
+
+    const bestiaryStore = useBestiaryStore()
+    bestiaryStore.checkAndUnlockOnCaseComplete(caseId)
 
     checkAndUnlockDependentCases()
     saveProgressToStorage()

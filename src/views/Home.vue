@@ -43,6 +43,11 @@ const features = [
     icon: '🏭',
     title: '案件工坊',
     description: '创建属于你自己的案件，配置证据、线索和多结局，体验创作的乐趣。'
+  },
+  {
+    icon: '📖',
+    title: '调查员图鉴',
+    description: '收录你在调查中遭遇的超自然生物、禁忌物品和神秘组织，追踪你的发现之旅。'
   }
 ]
 
@@ -60,6 +65,10 @@ function goToSaves() {
 
 function goToWorkshop() {
   router.push('/workshop')
+}
+
+function goToBestiary() {
+  router.push('/bestiary')
 }
 </script>
 
@@ -104,6 +113,9 @@ function goToWorkshop() {
           </button>
           <button class="secondary-button" @click="goToWorkshop">
             案件工坊
+          </button>
+          <button class="secondary-button" @click="goToBestiary">
+            调查员图鉴
           </button>
         </div>
       </div>
