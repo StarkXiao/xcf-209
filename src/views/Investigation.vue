@@ -18,6 +18,31 @@ const router = useRouter()
 const route = useRoute()
 const gameStore = useGameStore()
 
+const safeLogFilter = computed(() => ({
+  types: (gameStore as any).logFilter?.types || [],
+  phaseIds: (gameStore as any).logFilter?.phaseIds || [],
+  searchQuery: (gameStore as any).logFilter?.searchQuery || '',
+  timeStart: (gameStore as any).logFilter?.timeStart || null,
+  timeEnd: (gameStore as any).logFilter?.timeEnd || null
+}))
+
+const safeLogNavigation = computed(() => ({
+  focusedLogId: (gameStore as any).logNavigation?.focusedLogId || null,
+  currentIndex: (gameStore as any).logNavigation?.currentIndex || -1
+}))
+
+const safeFilteredGameLog = computed(() => {
+  return (gameStore as any).filteredGameLog || gameStore.gameState.gameLog || []
+})
+
+const safePhaseOptions = computed(() => {
+  return (gameStore as any).phaseOptions || []
+})
+
+const safeActiveRecoveryEvent = computed(() => {
+  return (gameStore as any).activeSanityRecoveryEvent || null
+})
+
 const currentScene = ref<Scene | null>(null)
 const selectedEvidence = ref<Evidence | null>(null)
 const showEvidenceDetail = ref(false)
@@ -55,42 +80,52 @@ const LOG_TYPE_OPTIONS: { type: string; label: string }[] = [
   { type: 'recipe_unlock', label: '📖 配方' }
 ]
 
-const isLogTypeFiltered = (type: string) => gameStore.logFilter.types.includes(type as any)
-const isPhaseFiltered = (phaseId: string) => gameStore.logFilter.phaseIds.includes(phaseId)
+const isLogTypeFiltered = (type: string) => safeLogFilter.value.types.includes(type as any)
+const isPhaseFiltered = (phaseId: string) => safeLogFilter.value.phaseIds.includes(phaseId)
 
 function toggleLogTypeFilter(type: string) {
-  gameStore.setLogFilterType(type as any)
+  if (typeof (gameStore as any).setLogFilterType === 'function') {
+    (gameStore as any).setLogFilterType(type as any)
+  }
 }
 
 function togglePhaseFilter(phaseId: string) {
-  gameStore.setLogFilterPhase(phaseId)
+  if (typeof (gameStore as any).setLogFilterPhase === 'function') {
+    (gameStore as any).setLogFilterPhase(phaseId)
+  }
 }
 
 function applyLogTimeFilter() {
   const start = logTimeStartInput.value ? new Date(logTimeStartInput.value).getTime() : null
   const end = logTimeEndInput.value ? new Date(logTimeEndInput.value).getTime() : null
-  gameStore.setLogFilterTimeRange(start, end)
+  if (typeof (gameStore as any).setLogFilterTimeRange === 'function') {
+    (gameStore as any).setLogFilterTimeRange(start, end)
+  }
 }
 
 function applyLogSearch() {
-  gameStore.setLogSearchQuery(logSearchInput.value)
+  if (typeof (gameStore as any).setLogSearchQuery === 'function') {
+    (gameStore as any).setLogSearchQuery(logSearchInput.value)
+  }
 }
 
 function resetLogFilters() {
   logSearchInput.value = ''
   logTimeStartInput.value = ''
   logTimeEndInput.value = ''
-  gameStore.clearLogFilter()
+  if (typeof (gameStore as any).clearLogFilter === 'function') {
+    (gameStore as any).clearLogFilter()
+  }
 }
 
 function getPhaseNameForLog(phaseId: string | undefined): string {
   if (!phaseId) return '初始阶段'
-  const phase = gameStore.phaseOptions.find(p => p.id === phaseId)
+  const phase = safePhaseOptions.value.find((p: any) => p.id === phaseId)
   return phase ? `阶段${phase.number}：${phase.name}` : phaseId
 }
 
 async function scrollToFocusedLog() {
-  const focusedId = gameStore.logNavigation.focusedLogId
+  const focusedId = safeLogNavigation.value.focusedLogId
   if (!focusedId) return
 
   await nextTick()
@@ -109,7 +144,7 @@ async function scrollToFocusedLog() {
 }
 
 watch(
-  () => gameStore.logNavigation.focusedLogId,
+  () => safeLogNavigation.value.focusedLogId,
   (newId) => {
     if (newId) {
       scrollToFocusedLog()
@@ -118,15 +153,17 @@ watch(
 )
 
 watch(
-  () => gameStore.filteredGameLog.length,
+  () => safeFilteredGameLog.value.length,
   () => {
-    const focusedId = gameStore.logNavigation.focusedLogId
+    const focusedId = safeLogNavigation.value.focusedLogId
     if (focusedId) {
-      const exists = gameStore.filteredGameLog.some(l => l.id === focusedId)
-      if (!exists && gameStore.filteredGameLog.length > 0) {
-        const currentIdx = gameStore.logNavigation.currentIndex
-        const newIdx = Math.min(currentIdx, gameStore.filteredGameLog.length - 1)
-        gameStore.navigateToLog(gameStore.filteredGameLog[newIdx].id)
+      const exists = safeFilteredGameLog.value.some((l: any) => l.id === focusedId)
+      if (!exists && safeFilteredGameLog.value.length > 0) {
+        const currentIdx = safeLogNavigation.value.currentIndex
+        const newIdx = Math.min(currentIdx, safeFilteredGameLog.value.length - 1)
+        if (typeof (gameStore as any).navigateToLog === 'function') {
+          (gameStore as any).navigateToLog(safeFilteredGameLog.value[newIdx].id)
+        }
       }
     }
   }
@@ -136,8 +173,10 @@ watch(
   () => showGameLog.value,
   (isOpen) => {
     if (isOpen) {
-      if (gameStore.logNavigation.currentIndex < 0 && gameStore.filteredGameLog.length > 0) {
-        gameStore.navigateLogLast()
+      if (safeLogNavigation.value.currentIndex < 0 && safeFilteredGameLog.value.length > 0) {
+        if (typeof (gameStore as any).navigateLogLast === 'function') {
+          (gameStore as any).navigateLogLast()
+        }
       }
     }
   }
@@ -253,20 +292,7 @@ function selectScene(scene: Scene) {
   showEvidenceDetail.value = false
 }
 
-function getSceneLockReason(scene: Scene): string {
-  const comboProgress = gameStore.getSceneUnlockConditionProgress(scene.id)
-  if (comboProgress) {
-    return comboProgress.description
-  }
-  const phaseId = gameStore.getSceneUnlockingPhase(scene.id)
-  if (!phaseId) return ''
-  const phase = gameStore.allPhases.find(p => p.id === phaseId)
-  if (!phase) return ''
-  if (phase.isActive || phase.isCompleted) return ''
-  return `需要解锁阶段：${phase.name}`
-}
-
-function getSceneComboProgress(scene: Scene): { total: number; satisfied: number } | null {
+function getSceneComboProgress(scene: Scene) {
   return gameStore.getSceneUnlockConditionProgress(scene.id)
 }
 
@@ -465,14 +491,131 @@ function getMilestoneDescription(msId: string): string {
   return desc
 }
 
-const activeRecoveryEvent = toRef(gameStore, 'activeSanityRecoveryEvent')
+const activeRecoveryEvent = safeActiveRecoveryEvent
 
 function handleRecoveryOption(optionId: string) {
-  gameStore.resolveSanityRecoveryOption(optionId)
+  if (typeof (gameStore as any).resolveSanityRecoveryOption === 'function') {
+    (gameStore as any).resolveSanityRecoveryOption(optionId)
+  }
 }
 
 function handleSkipRecovery() {
-  gameStore.skipSanityRecoveryEvent()
+  if (typeof (gameStore as any).skipSanityRecoveryEvent === 'function') {
+    (gameStore as any).skipSanityRecoveryEvent()
+  }
+}
+
+const showSceneUnlockModal = ref(false)
+const newlyUnlockedScene = ref<Scene | null>(null)
+const showConditionDetail = ref(false)
+const conditionDetailScene = ref<Scene | null>(null)
+const unlockedScenesSnapshot = ref<Set<string>>(new Set())
+
+function checkForNewSceneUnlocks() {
+  if (!caseData.value) return
+  const currentUnlocked = new Set<string>()
+  
+  for (const scene of caseData.value.scenes) {
+    if (gameStore.isSceneUnlocked(scene.id)) {
+      currentUnlocked.add(scene.id)
+      if (!unlockedScenesSnapshot.value.has(scene.id) && unlockedScenesSnapshot.value.size > 0) {
+        const lockState = gameStore.getSceneLockState(scene.id)
+        if (lockState && !lockState.unlockAnimationShown) {
+          newlyUnlockedScene.value = scene
+          showSceneUnlockModal.value = true
+          gameStore.markSceneUnlockAnimationShown(scene.id)
+        }
+      }
+    }
+  }
+  unlockedScenesSnapshot.value = currentUnlocked
+}
+
+function initSceneUnlockSnapshot() {
+  if (!caseData.value) return
+  unlockedScenesSnapshot.value = new Set()
+  for (const scene of caseData.value.scenes) {
+    if (gameStore.isSceneUnlocked(scene.id)) {
+      unlockedScenesSnapshot.value.add(scene.id)
+    }
+  }
+}
+
+watch(
+  () => gameStore.gameState.discoveredEvidence.length + 
+        gameStore.gameState.discoveredClues.length + 
+        gameStore.gameState.analyzedClues.length +
+        gameStore.gameState.visitedScenes.length,
+  () => {
+    nextTick(() => {
+      checkForNewSceneUnlocks()
+    })
+  }
+)
+
+watch(
+  () => gameStore.gameState.intelligenceState.completedPhases.length,
+  () => {
+    nextTick(() => {
+      checkForNewSceneUnlocks()
+    })
+  }
+)
+
+onMounted(() => {
+  nextTick(() => {
+    initSceneUnlockSnapshot()
+  })
+})
+
+function closeSceneUnlockModal() {
+  showSceneUnlockModal.value = false
+  newlyUnlockedScene.value = null
+}
+
+function showConditions(scene: Scene) {
+  conditionDetailScene.value = scene
+  showConditionDetail.value = true
+}
+
+function closeConditionDetail() {
+  showConditionDetail.value = false
+  conditionDetailScene.value = null
+}
+
+function getSceneLockIcon(scene: Scene): string {
+  return scene.lockIcon || '🔒'
+}
+
+function getLockedDescription(scene: Scene): string {
+  return scene.lockedDescription || '继续调查以解锁此场景'
+}
+
+function getNarrativeHints(scene: Scene): string[] {
+  const hints: string[] = []
+  if (scene.unlockConditions) {
+    for (const cond of scene.unlockConditions) {
+      if (cond.narrativeHint) {
+        hints.push(cond.narrativeHint)
+      }
+    }
+  }
+  return hints
+}
+
+function getSparkleStyle(index: number) {
+  const angle = (index / 20) * 360
+  const distance = 60 + Math.random() * 40
+  const delay = Math.random() * 0.8
+  const duration = 1.2 + Math.random() * 0.8
+  return {
+    '--angle': `${angle}deg`,
+    '--distance': `${distance}px`,
+    '--delay': `${delay}s`,
+    '--duration': `${duration}s`,
+    left: '50%',
+    top: '50%'
+  }
 }
 </script>
 
@@ -570,37 +713,81 @@ function handleSkipRecovery() {
               :class="{ 
                 active: currentScene?.id === scene.id,
                 locked: !gameStore.isSceneUnlocked(scene.id),
-                'hidden-scene': scene.unlockConditions && scene.unlockConditions.length > 0
+                'hidden-scene': scene.isSecretScene,
+                'just-unlocked': gameStore.getSceneLockState(scene.id) && !gameStore.getSceneLockState(scene.id)?.unlockAnimationShown
               }"
               @click="selectScene(scene)"
             >
-              <div class="scene-name">
-                <span v-if="!gameStore.isSceneUnlocked(scene.id)" class="lock-icon">🔒</span>
-                {{ scene.name }}
-              </div>
-              <div v-if="!gameStore.isSceneUnlocked(scene.id)" class="scene-lock-reason">
-                {{ getSceneLockReason(scene) }}
-              </div>
-              <div v-if="!gameStore.isSceneUnlocked(scene.id) && getSceneComboProgress(scene)" class="scene-combo-progress">
-                <div class="combo-progress-bar">
-                  <div 
-                    class="combo-progress-fill"
-                    :style="{ width: `${getSceneComboProgress(scene)!.total > 0 ? (getSceneComboProgress(scene)!.satisfied / getSceneComboProgress(scene)!.total) * 100 : 0}%` }"
-                  ></div>
+              <div class="scene-header">
+                <div class="scene-name">
+                  <span v-if="!gameStore.isSceneUnlocked(scene.id)" class="lock-icon">
+                    {{ getSceneLockIcon(scene) }}
+                  </span>
+                  <span v-else-if="scene.isSecretScene" class="secret-icon">🔮</span>
+                  {{ scene.name }}
                 </div>
-                <span class="combo-progress-text">
-                  🔗 证据组合: {{ getSceneComboProgress(scene)!.satisfied }}/{{ getSceneComboProgress(scene)!.total }}
-                </span>
-              </div>
-              <div v-else class="scene-progress">
-                <div class="mini-progress">
-                  <div 
-                    class="mini-progress-fill"
-                    :style="{ width: `${getSceneProgress(scene)}%` }"
-                  ></div>
+                <div v-if="scene.sceneOrder" class="scene-order">
+                  第{{ scene.sceneOrder }}章
                 </div>
-                <span class="progress-text">{{ getSceneProgress(scene) }}%</span>
               </div>
+              
+              <div v-if="!gameStore.isSceneUnlocked(scene.id)" class="scene-lock-info">
+                <div class="scene-lock-reason">
+                  {{ getLockedDescription(scene) }}
+                </div>
+                
+                <div v-if="getSceneComboProgress(scene)" class="scene-combo-progress">
+                  <div class="combo-progress-bar">
+                    <div 
+                      class="combo-progress-fill"
+                      :style="{ width: `${getSceneComboProgress(scene)!.total > 0 ? (getSceneComboProgress(scene)!.satisfied / getSceneComboProgress(scene)!.total) * 100 : 0}%` }"
+                    ></div>
+                  </div>
+                  <span class="combo-progress-text">
+                    🔗 进度: {{ getSceneComboProgress(scene)!.satisfied }}/{{ getSceneComboProgress(scene)!.total }}
+                  </span>
+                </div>
+
+                <button 
+                  v-if="getSceneComboProgress(scene)"
+                  class="view-conditions-btn"
+                  @click.stop="showConditions(scene)"
+                >
+                  📋 查看详情
+                </button>
+
+                <div v-if="getNarrativeHints(scene).length > 0" class="narrative-hints">
+                  <div 
+                    v-for="(hint, idx) in getNarrativeHints(scene)" 
+                    :key="idx" 
+                    class="hint-item"
+                  >
+                    💡 {{ hint }}
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="scene-unlocked-info">
+                <div v-if="scene.unlockNarrative" class="scene-unlock-narrative">
+                  ✨ {{ scene.unlockNarrative.slice(0, 50) }}{{ scene.unlockNarrative.length > 50 ? '...' : '' }}
+                </div>
+                <div class="scene-progress">
+                  <div class="mini-progress">
+                    <div 
+                      class="mini-progress-fill"
+                      :style="{ width: `${getSceneProgress(scene)}%` }"
+                    ></div>
+                  </div>
+                  <span class="progress-text">{{ getSceneProgress(scene) }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="scene-overview">
+            <div class="overview-item">
+              <span class="overview-label">已解锁</span>
+              <span class="overview-value">{{ gameStore.getUnlockedSceneCount() }}/{{ caseData.scenes.length }}</span>
             </div>
           </div>
 
@@ -971,7 +1158,7 @@ function handleSkipRecovery() {
                 </div>
               </div>
 
-              <div class="log-filter-group" v-if="gameStore.phaseOptions.length > 0">
+              <div class="log-filter-group" v-if="safePhaseOptions.length > 0">
                 <span class="filter-group-label">案件阶段</span>
                 <div class="filter-chips">
                   <button
@@ -980,7 +1167,7 @@ function handleSkipRecovery() {
                     @click="togglePhaseFilter('__no_phase__')"
                   >📌 初始阶段</button>
                   <button
-                    v-for="phase in gameStore.phaseOptions"
+                    v-for="phase in safePhaseOptions"
                     :key="phase.id"
                     class="filter-chip"
                     :class="{ active: isPhaseFiltered(phase.id) }"
@@ -1009,28 +1196,28 @@ function handleSkipRecovery() {
               </div>
             </div>
 
-            <div class="log-navigation-bar" v-if="gameStore.filteredGameLog.length > 0">
-              <button class="nav-btn" @click="gameStore.navigateLogFirst()" title="最早">⏮</button>
-              <button class="nav-btn" @click="gameStore.navigateLogPrev()" title="上一条">◀</button>
+            <div class="log-navigation-bar" v-if="safeFilteredGameLog.length > 0">
+              <button class="nav-btn" @click="(gameStore as any).navigateLogFirst && (gameStore as any).navigateLogFirst()" title="最早">⏮</button>
+              <button class="nav-btn" @click="(gameStore as any).navigateLogPrev && (gameStore as any).navigateLogPrev()" title="上一条">◀</button>
               <span class="nav-position">
-                {{ gameStore.logNavigation.currentIndex >= 0 ? gameStore.logNavigation.currentIndex + 1 : 0 }} / {{ gameStore.filteredGameLog.length }}
+                {{ safeLogNavigation.currentIndex >= 0 ? safeLogNavigation.currentIndex + 1 : 0 }} / {{ safeFilteredGameLog.length }}
               </span>
-              <button class="nav-btn" @click="gameStore.navigateLogNext()" title="下一条">▶</button>
-              <button class="nav-btn" @click="gameStore.navigateLogLast()" title="最新">⏭</button>
+              <button class="nav-btn" @click="(gameStore as any).navigateLogNext && (gameStore as any).navigateLogNext()" title="下一条">▶</button>
+              <button class="nav-btn" @click="(gameStore as any).navigateLogLast && (gameStore as any).navigateLogLast()" title="最新">⏭</button>
             </div>
 
             <div class="log-list-container" ref="logListContainer">
               <div class="log-list">
                 <div 
-                  v-for="log in gameStore.filteredGameLog.slice().reverse()" 
+                  v-for="log in safeFilteredGameLog.slice().reverse()" 
                   :key="log.id"
                   :data-log-id="log.id"
                   class="log-entry"
                   :class="[
                     `log-type-${log.type}`,
-                    { 'log-focused': gameStore.logNavigation.focusedLogId === log.id }
+                    { 'log-focused': safeLogNavigation.focusedLogId === log.id }
                   ]"
-                  @click="gameStore.navigateToLog(log.id)"
+                  @click="(gameStore as any).navigateToLog && (gameStore as any).navigateToLog(log.id)"
                 >
                   <div class="log-entry-header">
                     <span class="log-type-badge">{{ getLogTypeLabel(log.type) }}</span>
@@ -1044,9 +1231,9 @@ function handleSkipRecovery() {
 
             <div class="log-footer">
               <span class="log-count">
-                筛选结果 {{ gameStore.filteredGameLog.length }} / {{ gameStore.gameState.gameLog.length }} 条记录
+                筛选结果 {{ safeFilteredGameLog.length }} / {{ gameStore.gameState.gameLog.length }} 条记录
               </span>
-              <span class="log-filter-hint" v-if="gameStore.filteredGameLog.length !== gameStore.gameState.gameLog.length">
+              <span class="log-filter-hint" v-if="safeFilteredGameLog.length !== gameStore.gameState.gameLog.length">
                 · 已筛选
               </span>
             </div>
@@ -1089,6 +1276,122 @@ function handleSkipRecovery() {
           @close="showCraftingPanel = false"
         />
       </transition>
+
+      <transition name="scene-unlock">
+        <div v-if="showSceneUnlockModal && newlyUnlockedScene" class="scene-unlock-overlay" @click="closeSceneUnlockModal">
+          <div class="scene-unlock-modal" @click.stop>
+            <div class="unlock-sparkles">
+              <span v-for="i in 20" :key="i" class="sparkle" :style="getSparkleStyle(i)"></span>
+            </div>
+            
+            <div class="unlock-icon-wrapper">
+              <span class="unlock-main-icon">
+                {{ newlyUnlockedScene.isSecretScene ? '🔮' : '🔓' }}
+              </span>
+              <div class="unlock-ring"></div>
+              <div class="unlock-ring delay-1"></div>
+              <div class="unlock-ring delay-2"></div>
+            </div>
+
+            <h2 class="unlock-title">
+              {{ newlyUnlockedScene.isSecretScene ? '发现秘密场景！' : '新场景已解锁！' }}
+            </h2>
+
+            <div class="unlock-scene-name">
+              {{ newlyUnlockedScene.name }}
+            </div>
+
+            <div v-if="newlyUnlockedScene.unlockNarrative" class="unlock-narrative">
+              "{{ newlyUnlockedScene.unlockNarrative }}"
+            </div>
+
+            <div class="unlock-description">
+              {{ newlyUnlockedScene.description }}
+            </div>
+
+            <div v-if="newlyUnlockedScene.unlockRewardText" class="unlock-rewards">
+              <span class="reward-icon">✨</span>
+              {{ newlyUnlockedScene.unlockRewardText }}
+            </div>
+
+            <button class="unlock-continue-btn" @click="closeSceneUnlockModal">
+              进入调查 →
+            </button>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="fade">
+        <div v-if="showConditionDetail && conditionDetailScene" class="condition-overlay" @click="closeConditionDetail">
+          <div class="condition-modal" @click.stop>
+            <div class="condition-header">
+              <span class="condition-lock-icon">{{ getSceneLockIcon(conditionDetailScene) }}</span>
+              <h3>{{ conditionDetailScene.name }} - 解锁条件</h3>
+              <button class="close-btn" @click="closeConditionDetail">✕</button>
+            </div>
+
+            <div class="condition-locked-desc">
+              {{ getLockedDescription(conditionDetailScene) }}
+            </div>
+
+            <div v-if="getSceneComboProgress(conditionDetailScene)" class="condition-overall-progress">
+              <div class="overall-progress-label">
+                <span>总体进度</span>
+                <span class="progress-percent">
+                  {{ getSceneComboProgress(conditionDetailScene)!.total > 0 
+                    ? Math.round((getSceneComboProgress(conditionDetailScene)!.satisfied / getSceneComboProgress(conditionDetailScene)!.total) * 100) 
+                    : 0 }}%
+                </span>
+              </div>
+              <div class="overall-progress-bar">
+                <div 
+                  class="overall-progress-fill"
+                  :style="{ 
+                    width: `${getSceneComboProgress(conditionDetailScene)!.total > 0 
+                      ? (getSceneComboProgress(conditionDetailScene)!.satisfied / getSceneComboProgress(conditionDetailScene)!.total) * 100 
+                      : 0}%` 
+                  }"
+                ></div>
+              </div>
+            </div>
+
+            <div class="condition-list">
+              <div 
+                v-for="(cond, idx) in getSceneComboProgress(conditionDetailScene)?.conditions || []" 
+                :key="idx"
+                class="condition-item"
+                :class="{ satisfied: cond.satisfied }"
+              >
+                <span class="condition-status">
+                  {{ cond.satisfied ? '✅' : '⬜' }}
+                </span>
+                <div class="condition-content">
+                  <div class="condition-desc">{{ cond.description }}</div>
+                  <div v-if="cond.progressText" class="condition-progress-text">
+                    {{ cond.progressText }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="getNarrativeHints(conditionDetailScene).length > 0" class="condition-hints">
+              <h4>💡 调查提示</h4>
+              <div 
+                v-for="(hint, idx) in getNarrativeHints(conditionDetailScene)" 
+                :key="idx" 
+                class="hint-text"
+              >
+                {{ hint }}
+              </div>
+            </div>
+
+            <button class="condition-close-btn" @click="closeConditionDetail">
+              继续调查
+            </button>
+          </div>
+        </div>
+      </transition>
+
       </div>
     </template>
   </div>
@@ -2820,5 +3123,553 @@ function handleSkipRecovery() {
     height: calc(100vh - 300px);
     min-height: 400px;
   }
+}
+
+.scene-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.scene-order {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  background: rgba(107, 76, 154, 0.2);
+  border: 1px solid rgba(107, 76, 154, 0.4);
+  border-radius: 8px;
+  color: #b39ddb;
+  font-weight: 600;
+}
+
+.secret-icon {
+  margin-right: 0.35rem;
+  font-size: 0.85rem;
+  animation: secret-pulse 2s ease-in-out infinite;
+}
+
+@keyframes secret-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(139, 74, 201, 0.5)); }
+  50% { filter: drop-shadow(0 0 8px rgba(139, 74, 201, 0.9)); }
+}
+
+.scene-lock-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.view-conditions-btn {
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 6px;
+  color: #ffd700;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.view-conditions-btn:hover {
+  background: rgba(255, 215, 0, 0.2);
+  border-color: rgba(255, 215, 0, 0.5);
+  transform: translateY(-1px);
+}
+
+.narrative-hints {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgba(255, 215, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.hint-item {
+  font-size: 0.7rem;
+  color: #ffcc80;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.scene-unlocked-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scene-unlock-narrative {
+  font-size: 0.72rem;
+  color: #c9a0ff;
+  font-style: italic;
+  line-height: 1.5;
+  padding: 0.35rem 0.5rem;
+  background: rgba(139, 74, 201, 0.08);
+  border-left: 2px solid rgba(139, 74, 201, 0.4);
+  border-radius: 0 4px 4px 0;
+}
+
+.scene-overview {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(107, 76, 154, 0.2);
+}
+
+.overview-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.overview-label {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.overview-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-accent-light);
+}
+
+.scene-item.just-unlocked {
+  animation: scene-unlock-glow 2s ease-out;
+}
+
+@keyframes scene-unlock-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(139, 74, 201, 0.8);
+    border-color: #8b4ac9;
+  }
+  25% {
+    box-shadow: 0 0 30px 5px rgba(139, 74, 201, 0.5);
+    border-color: #c9a0ff;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(139, 74, 201, 0);
+    border-color: var(--color-border);
+  }
+}
+
+.scene-unlock-overlay,
+.condition-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+  backdrop-filter: blur(8px);
+}
+
+.scene-unlock-modal {
+  position: relative;
+  max-width: 520px;
+  width: 100%;
+  background: linear-gradient(180deg, #1a1025 0%, #0d0815 100%);
+  border: 2px solid #8b4ac9;
+  border-radius: 16px;
+  padding: 3rem 2.5rem;
+  text-align: center;
+  box-shadow: 
+    0 0 60px rgba(139, 74, 201, 0.4),
+    0 0 120px rgba(139, 74, 201, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.unlock-sparkles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.sparkle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: radial-gradient(circle, #ffd700 0%, transparent 70%);
+  border-radius: 50%;
+  animation: sparkle-burst var(--duration) ease-out var(--delay) forwards;
+  opacity: 0;
+}
+
+@keyframes sparkle-burst {
+  0% {
+    transform: translate(-50%, -50%) rotate(var(--angle)) translateY(0) scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(var(--angle)) translateY(calc(var(--distance) * -1)) scale(1.5);
+    opacity: 0;
+  }
+}
+
+.unlock-icon-wrapper {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.unlock-main-icon {
+  font-size: 3.5rem;
+  position: relative;
+  z-index: 2;
+  animation: icon-pop 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes icon-pop {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.unlock-ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid #8b4ac9;
+  border-radius: 50%;
+  animation: ring-expand 1.5s ease-out forwards;
+}
+
+.unlock-ring.delay-1 {
+  animation-delay: 0.2s;
+  opacity: 0.7;
+}
+
+.unlock-ring.delay-2 {
+  animation-delay: 0.4s;
+  opacity: 0.4;
+}
+
+@keyframes ring-expand {
+  0% {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.unlock-title {
+  font-size: 1.6rem;
+  color: #c9a0ff;
+  margin: 0 0 0.5rem;
+  text-shadow: 0 0 20px rgba(139, 74, 201, 0.6);
+  animation: title-fade 0.8s ease-out 0.3s both;
+}
+
+@keyframes title-fade {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.unlock-scene-name {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--color-accent-light);
+  margin: 0.5rem 0 1.5rem;
+  text-shadow: 0 0 30px rgba(107, 76, 154, 0.8);
+  animation: title-fade 0.8s ease-out 0.5s both;
+}
+
+.unlock-narrative {
+  font-size: 0.95rem;
+  color: #e0bee0;
+  font-style: italic;
+  line-height: 1.8;
+  margin: 1rem 0;
+  padding: 1rem 1.25rem;
+  background: rgba(139, 74, 201, 0.1);
+  border-left: 3px solid #8b4ac9;
+  border-right: 3px solid #8b4ac9;
+  border-radius: 8px;
+  animation: title-fade 0.8s ease-out 0.7s both;
+}
+
+.unlock-description {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  line-height: 1.7;
+  margin: 1rem 0;
+  animation: title-fade 0.8s ease-out 0.9s both;
+}
+
+.unlock-rewards {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0 1.5rem;
+  background: linear-gradient(90deg, rgba(255, 215, 0, 0.1), rgba(255, 140, 0, 0.1));
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 8px;
+  color: #ffd700;
+  font-size: 0.9rem;
+  font-weight: 600;
+  animation: title-fade 0.8s ease-out 1.1s both;
+}
+
+.reward-icon {
+  font-size: 1.1rem;
+  animation: reward-bounce 1s ease-in-out infinite;
+}
+
+@keyframes reward-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.unlock-continue-btn {
+  width: 100%;
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #6b4c9a, #8b4ac9);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(139, 74, 201, 0.4);
+  animation: title-fade 0.8s ease-out 1.3s both;
+}
+
+.unlock-continue-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(139, 74, 201, 0.6);
+  background: linear-gradient(135deg, #7b5caa, #9b5ad9);
+}
+
+.unlock-continue-btn:active {
+  transform: translateY(0);
+}
+
+.scene-unlock-enter-active,
+.scene-unlock-leave-active {
+  transition: all 0.4s ease;
+}
+
+.scene-unlock-enter-from,
+.scene-unlock-leave-to {
+  opacity: 0;
+}
+
+.scene-unlock-enter-from .scene-unlock-modal,
+.scene-unlock-leave-to .scene-unlock-modal {
+  transform: scale(0.8);
+}
+
+.condition-modal {
+  max-width: 480px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #1a1525 0%, #12101a 100%);
+  border: 1px solid rgba(107, 76, 154, 0.5);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.condition-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(107, 76, 154, 0.3);
+  position: sticky;
+  top: 0;
+  background: inherit;
+  z-index: 10;
+}
+
+.condition-header h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--color-accent-light);
+}
+
+.condition-lock-icon {
+  font-size: 1.5rem;
+}
+
+.close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+}
+
+.condition-locked-desc {
+  padding: 1rem 1.5rem;
+  font-size: 0.85rem;
+  color: var(--color-warning);
+  font-style: italic;
+  line-height: 1.6;
+}
+
+.condition-overall-progress {
+  padding: 0 1.5rem 1rem;
+}
+
+.overall-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  margin-bottom: 0.4rem;
+}
+
+.progress-percent {
+  color: #ffd700;
+  font-weight: 700;
+}
+
+.overall-progress-bar {
+  height: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+.overall-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffd700, #ff8c00, #ffd700);
+  background-size: 200% 100%;
+  animation: progress-shimmer 2s linear infinite;
+  transition: width 0.5s ease;
+}
+
+@keyframes progress-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.condition-list {
+  padding: 0.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.condition-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.condition-item.satisfied {
+  background: rgba(76, 175, 80, 0.1);
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.condition-status {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.condition-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.condition-desc {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.condition-item.satisfied .condition-desc {
+  color: #81c784;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.condition-progress-text {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: #ffd700;
+  font-family: monospace;
+}
+
+.condition-hints {
+  margin: 1rem 1.5rem;
+  padding: 1rem;
+  background: rgba(255, 204, 128, 0.08);
+  border: 1px dashed rgba(255, 204, 128, 0.3);
+  border-radius: 8px;
+}
+
+.condition-hints h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #ffcc80;
+}
+
+.hint-text {
+  font-size: 0.78rem;
+  color: #ffe0b2;
+  line-height: 1.6;
+  margin-bottom: 0.35rem;
+}
+
+.hint-text:last-child {
+  margin-bottom: 0;
+}
+
+.condition-close-btn {
+  margin: 1rem 1.5rem 1.5rem;
+  width: calc(100% - 3rem);
+  padding: 0.85rem;
+  background: rgba(107, 76, 154, 0.2);
+  border: 1px solid rgba(107, 76, 154, 0.4);
+  border-radius: 8px;
+  color: var(--color-accent-light);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.condition-close-btn:hover {
+  background: rgba(107, 76, 154, 0.35);
+  border-color: rgba(107, 76, 154, 0.6);
+  transform: translateY(-1px);
 }
 </style>

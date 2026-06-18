@@ -1,14 +1,13 @@
 import { defineStore } from 'pinia'
-import { ref, computed, toRef } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, EvidenceSufficiencyCheck, DeductionFeedback, DeductionValidationResult, EvidenceSufficiencyLevel, DeductionFeedbackLevel, ConclusionOption } from '@/types'
-import { getCaseById, setCaseStatus, failCase as failCaseData, abandonCase as abandonCaseData } from '@/data/cases'
+import { ref, computed } from 'vue'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
+import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
 import { useCharacterStore } from './character'
 import { useInventoryStore } from './inventory'
 import { useBestiaryStore } from './bestiary'
 import { useNewGamePlusStore } from './newGamePlus'
-import { useProgressStore } from './progress'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
 import { 
   getAvailableAnomalyEvents, 
@@ -34,22 +33,8 @@ import {
   determineEndingAlignment,
   CORRUPTION_MILESTONES
 } from '@/data/spiritualPollution'
-import {
-  pickRandomSanityRecoveryEvent
-} from '@/data/sanityRecovery'
-import type { SanityRecoveryEvent } from '@/types'
 
 let timerInterval: ReturnType<typeof setInterval> | null = null
-
-interface TemporaryEffect {
-  remainingSearches?: number
-  remainingSeconds?: number
-  value: number
-}
-
-const tempEvidencePenalty = ref<TemporaryEffect | null>(null)
-const tempAnomalyRiskBonus = ref<TemporaryEffect | null>(null)
-const tempClueAnalysisPenalty = ref<TemporaryEffect | null>(null)
 
 const DEFAULT_SCORE_CONFIG: CaseScoreConfig = {
   evidenceWeight: 30,
@@ -139,9 +124,7 @@ export const useGameStore = defineStore('game', () => {
     clueComparisons: [],
     deductionHints: [],
     comparisonMode: false,
-    comparisonSelectedClues: [],
-    activeSanityRecoveryEvent: null,
-    sanityRecoveryEventCooldown: 0
+    comparisonSelectedClues: []
   })
 
   const currentCase = computed(() => {
@@ -299,14 +282,8 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: [],
-      activeSanityRecoveryEvent: null,
-      sanityRecoveryEventCooldown: 0
+      comparisonSelectedClues: []
     }
-
-    tempEvidencePenalty.value = null
-    tempAnomalyRiskBonus.value = null
-    tempClueAnalysisPenalty.value = null
 
     startTimer()
     startPhase('phase-1')
@@ -339,10 +316,6 @@ export const useGameStore = defineStore('game', () => {
     getInventoryStore().checkAndUnlockRecipes()
 
     setCaseStatus(caseId, 'in_progress')
-
-    const saveStore = useSaveStore()
-    saveStore.startAutoSaveTimer()
-
     return true
   }
 
@@ -492,11 +465,6 @@ export const useGameStore = defineStore('game', () => {
 
     if (amount < 0) {
       checkAnomalyEvents()
-      
-      const sanityPercent = (gameState.value.sanity / effectiveMaxSanity.value) * 100
-      if (sanityPercent <= 30 && !gameState.value.activeSanityRecoveryEvent) {
-        checkAndTriggerSanityRecovery('low_sanity')
-      }
     }
     
     decayPollution()
@@ -504,56 +472,11 @@ export const useGameStore = defineStore('game', () => {
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnSanityChange(gameState.value.sanity)
 
-    if (amount < 0) {
-      const sanityPercent = (gameState.value.sanity / effectiveMaxSanity.value) * 100
-      const thresholds = [80, 60, 40, 20, 10]
-      for (const threshold of thresholds) {
-        const prevPercent = ((gameState.value.sanity - finalAmount) / effectiveMaxSanity.value) * 100
-        if (prevPercent > threshold && sanityPercent <= threshold) {
-          const saveStore = useSaveStore()
-          saveStore.createKeySnapshot(
-            'sanity_threshold',
-            `理智值降至 ${threshold}% 以下：${reason}`,
-            {
-              significance: threshold <= 20 ? 'critical' : threshold <= 40 ? 'major' : 'moderate'
-            }
-          )
-          break
-        }
-      }
-    }
-
     if (gameState.value.sanity <= 0) {
-      triggerCaseFailure()
       return 'insane'
     }
     
     return 'ok'
-  }
-
-  function triggerCaseFailure(): void {
-    const caseId = gameState.value.currentCase
-    if (!caseId) return
-
-    addLog('sanity_loss', '💀 理智值归零，调查失败...')
-    failCaseData(caseId)
-    stopTimer()
-
-    const progressStore = useProgressStore()
-    progressStore.recordCaseFailure(caseId, gameState.value.maxSanity - gameState.value.sanity)
-  }
-
-  function abandonCurrentCase(): boolean {
-    const caseId = gameState.value.currentCase
-    if (!caseId) return false
-
-    addLog('sanity_loss', '⏸️ 调查已搁置...')
-    abandonCaseData(caseId)
-    stopTimer()
-
-    const progressStore = useProgressStore()
-    progressStore.recordCaseAbandon(caseId)
-    return true
   }
 
   function calculateHitRate(evidence: Evidence): HitRateResult {
@@ -579,9 +502,8 @@ export const useGameStore = defineStore('game', () => {
     const talentBonus = talentEffects.value.evidenceHitRateBonus
     const sanityPenalty = getSanityPenalty(gameState.value.sanity, gameState.value.maxSanity)
     const pollutionPenalty = milestoneEffects.value.hitRatePenalty
-    const tempPenalty = tempEvidencePenalty.value?.value || 0
 
-    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty - tempPenalty
+    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty
     finalRate = Math.max(5, Math.min(95, finalRate))
 
     const isGuaranteed = finalRate >= 95
@@ -591,7 +513,7 @@ export const useGameStore = defineStore('game', () => {
       baseRate,
       toolBonus: toolBonus + talentBonus,
       durabilityPenalty,
-      sanityPenalty: sanityPenalty + pollutionPenalty + tempPenalty,
+      sanityPenalty: sanityPenalty + pollutionPenalty,
       finalRate,
       isGuaranteed,
       isImpossible
@@ -700,15 +622,6 @@ export const useGameStore = defineStore('game', () => {
     }
     checkEvidenceRefresh('after_search', { evidenceId: evidence.id, success })
     
-    if (tempEvidencePenalty.value?.remainingSearches !== undefined) {
-      tempEvidencePenalty.value.remainingSearches--
-      if (tempEvidencePenalty.value.remainingSearches <= 0) {
-        tempEvidencePenalty.value = null
-      }
-    }
-    
-    checkAndTriggerSanityRecovery('after_search')
-    
     return result
   }
 
@@ -731,17 +644,11 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const caseData = currentCase.value
-    let isSpecial = false
-    let evidenceName = evidenceId
     if (caseData) {
       for (const scene of caseData.scenes) {
         const evidence = scene.evidence.find(e => e.id === evidenceId)
-        if (evidence) {
-          evidenceName = evidence.name
-          isSpecial = !!evidence.isSpecial
-          if (evidence.materialDrops && evidence.materialDrops.length > 0) {
-            getInventoryStore().dropMaterialsFromEvidence(evidenceId, evidence.materialDrops)
-          }
+        if (evidence && evidence.materialDrops && evidence.materialDrops.length > 0) {
+          getInventoryStore().dropMaterialsFromEvidence(evidenceId, evidence.materialDrops)
         }
       }
     }
@@ -755,18 +662,6 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('evidence_discovered', evidenceId)
     updateDeductionCompleteness()
-
-    if (isSpecial || gameState.value.discoveredEvidence.length % 3 === 0) {
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'evidence_discovered',
-        isSpecial ? `发现关键证据：${evidenceName}` : `发现证据：${evidenceName}`,
-        {
-          relatedIds: [evidenceId],
-          significance: isSpecial ? 'major' : 'minor'
-        }
-      )
-    }
 
     return true
   }
@@ -800,23 +695,13 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const clueAnalysisCost = currentCase.value?.timeLimit?.clueAnalysisCost || 8
-    const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
-    const tempAnalysisPenalty = tempClueAnalysisPenalty.value?.value || 0
-    
-    let effectiveCost = clueAnalysisCost
-    if (analysisSpeedBonus > 0) {
-      effectiveCost = Math.max(2, Math.floor(clueAnalysisCost * (1 - analysisSpeedBonus / 200)))
-    }
-    if (tempAnalysisPenalty > 0) {
-      effectiveCost = Math.ceil(effectiveCost * (1 + tempAnalysisPenalty / 100))
-    }
-    
-    consumeTime(effectiveCost, `分析线索：${clueId}`)
+    consumeTime(clueAnalysisCost, `分析线索：${clueId}`)
     gameState.value.timerState.clueAnalysisCount++
 
+    const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
     const activeProfile = characterStore.activeProfile
     const wisdomBonus = activeProfile ? (activeProfile.stats.wisdom - 50) * 0.3 : 0
-    const totalAnalysisBonus = analysisSpeedBonus + wisdomBonus - tempAnalysisPenalty
+    const totalAnalysisBonus = analysisSpeedBonus + wisdomBonus
     
     gameState.value.analyzedClues.push(clueId)
     
@@ -897,18 +782,6 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('clue_analyzed', clueId)
     updateDeductionCompleteness()
-
-    if (gameState.value.analyzedClues.length % 2 === 0 || bonusCluesDiscovered.length > 0 || autoConnections.length > 0) {
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'clue_analyzed',
-        `分析线索：${clueId}`,
-        {
-          relatedIds: [clueId, ...bonusCluesDiscovered],
-          significance: (bonusCluesDiscovered.length > 0 || autoConnections.length > 0) ? 'moderate' : 'minor'
-        }
-      )
-    }
     
     return { 
       success: true, 
@@ -1062,21 +935,6 @@ export const useGameStore = defineStore('game', () => {
     
     checkEvidenceRefresh('after_scene_switch', { sceneId })
     checkMailDelivery('scene_visited', sceneId)
-    
-    decrementRecoveryCooldown()
-    checkAndTriggerSanityRecovery('scene_enter')
-
-    if (isFirstVisit) {
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'scene_entered',
-        `进入新场景：${sceneId}`,
-        {
-          sceneId,
-          significance: 'minor'
-        }
-      )
-    }
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -1163,8 +1021,7 @@ export const useGameStore = defineStore('game', () => {
       now
     )
     
-    const tempAnomalyBonus = tempAnomalyRiskBonus.value?.value || 0
-    const eventTriggerBonus = talentEffects.value.eventTriggerChance + milestoneEffects.value.anomalyEventBonus + tempAnomalyBonus
+    const eventTriggerBonus = talentEffects.value.eventTriggerChance + milestoneEffects.value.anomalyEventBonus
     
     for (const event of availableEvents) {
       if (checkAnomalyTrigger(event, gameState.value.sanity, gameState.value.maxSanity, eventTriggerBonus)) {
@@ -1311,114 +1168,6 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
 
-  function checkAndTriggerSanityRecovery(context: SanityRecoveryEvent['triggerContext']) {
-    if (gameState.value.activeSanityRecoveryEvent) return
-    if (gameState.value.sanityRecoveryEventCooldown > 0) return
-    if (!gameState.value.currentCase) return
-
-    const currentSanity = gameState.value.sanity
-    const maxSanity = effectiveMaxSanity.value
-    const sanityPercent = (currentSanity / maxSanity) * 100
-
-    let baseChance = 0
-    switch (context) {
-      case 'scene_enter':
-        baseChance = sanityPercent < 40 ? 85 : sanityPercent < 70 ? 55 : 35
-        break
-      case 'after_search':
-        baseChance = sanityPercent < 40 ? 65 : sanityPercent < 70 ? 40 : 20
-        break
-      case 'low_sanity':
-        baseChance = 90
-        break
-      case 'random':
-        baseChance = sanityPercent < 50 ? 35 : 15
-        break
-    }
-
-    const event = pickRandomSanityRecoveryEvent(context, currentSanity, maxSanity, baseChance)
-    if (event) {
-      gameState.value.activeSanityRecoveryEvent = event
-      addLog('discovery', `💭 出现精神恢复机会：${event.name}`)
-      addLog('discovery', event.description)
-    }
-  }
-
-  function resolveSanityRecoveryOption(optionId: string): boolean {
-    const event = gameState.value.activeSanityRecoveryEvent
-    if (!event) return false
-
-    const option = event.options.find(o => o.id === optionId)
-    if (!option) return false
-
-    addLog('discovery', `选择「${option.text}」`)
-    if (option.flavorText) {
-      addLog('discovery', option.flavorText)
-    }
-
-    if (option.sanityRecovery > 0) {
-      modifySanity(option.sanityRecovery, `恢复事件：${event.name} - ${option.text}`)
-    }
-
-    for (const cost of option.costs) {
-      switch (cost.type) {
-        case 'time':
-          consumeTime(cost.value, `恢复代价：${cost.description}`)
-          break
-        case 'evidence_penalty':
-          tempEvidencePenalty.value = {
-            value: cost.value,
-            remainingSearches: 3
-          }
-          addLog('penalty', `⚠️ ${cost.description}`)
-          break
-        case 'pollution_erosion':
-          addPollution(0, cost.value, 'sanity_recovery_cost', `恢复代价：${cost.description}`)
-          break
-        case 'tool_durability':
-          gameState.value.tools.forEach(tool => {
-            tool.durability = Math.max(0, tool.durability - cost.value)
-          })
-          addLog('penalty', `⚠️ ${cost.description}`)
-          break
-        case 'anomaly_risk':
-          tempAnomalyRiskBonus.value = {
-            value: cost.value,
-            remainingSeconds: 30
-          }
-          addLog('penalty', `⚠️ ${cost.description}`)
-          break
-        case 'clue_analysis_penalty':
-          tempClueAnalysisPenalty.value = {
-            value: cost.value,
-            remainingSeconds: 60
-          }
-          addLog('penalty', `⚠️ ${cost.description}`)
-          break
-      }
-    }
-
-    gameState.value.activeSanityRecoveryEvent = null
-    gameState.value.sanityRecoveryEventCooldown = 3
-
-    return true
-  }
-
-  function skipSanityRecoveryEvent() {
-    const event = gameState.value.activeSanityRecoveryEvent
-    if (!event) return
-    
-    addLog('discovery', `放弃了精神恢复机会：${event.name}`)
-    gameState.value.activeSanityRecoveryEvent = null
-    gameState.value.sanityRecoveryEventCooldown = 2
-  }
-
-  function decrementRecoveryCooldown() {
-    if (gameState.value.sanityRecoveryEventCooldown > 0) {
-      gameState.value.sanityRecoveryEventCooldown--
-    }
-  }
-
   function isFakeClue(clueId: string): boolean {
     return gameState.value.anomalyState.activeMisleadingClues.some(
       c => c.fakeClueId === clueId && !c.isDisproven
@@ -1518,163 +1267,15 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function addLog(type: GameLogEntry['type'], description: string, details?: Record<string, unknown>) {
-    const phaseId = gameState.value.intelligenceState.currentPhaseId
     const entry: GameLogEntry = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
       type,
       description,
-      details: { ...details, phaseId: phaseId || undefined }
+      details
     }
     gameState.value.gameLog.push(entry)
     gameState.value.lastSaveTime = Date.now()
-  }
-
-  const logFilter = ref<{
-    types: GameLogEntry['type'][]
-    phaseIds: string[]
-    timeRange: { start: number | null; end: number | null }
-    searchQuery: string
-  }>({
-    types: [],
-    phaseIds: [],
-    timeRange: { start: null, end: null },
-    searchQuery: ''
-  })
-
-  const logNavigation = ref<{
-    currentIndex: number
-    focusedLogId: string | null
-  }>({
-    currentIndex: -1,
-    focusedLogId: null
-  })
-
-  const filteredGameLog = computed(() => {
-    let logs = gameState.value.gameLog
-
-    if (logFilter.value.types.length > 0) {
-      logs = logs.filter(l => logFilter.value.types.includes(l.type))
-    }
-
-    if (logFilter.value.phaseIds.length > 0) {
-      logs = logs.filter(l => {
-        const entryPhaseId = l.details?.phaseId as string | undefined
-        if (!entryPhaseId) return logFilter.value.phaseIds.includes('__no_phase__')
-        return logFilter.value.phaseIds.includes(entryPhaseId)
-      })
-    }
-
-    if (logFilter.value.timeRange.start !== null) {
-      logs = logs.filter(l => l.timestamp >= logFilter.value.timeRange.start!)
-    }
-    if (logFilter.value.timeRange.end !== null) {
-      logs = logs.filter(l => l.timestamp <= logFilter.value.timeRange.end!)
-    }
-
-    if (logFilter.value.searchQuery.trim()) {
-      const q = logFilter.value.searchQuery.toLowerCase()
-      logs = logs.filter(l => l.description.toLowerCase().includes(q))
-    }
-
-    return logs
-  })
-
-  const filteredLogStats = computed(() => {
-    const logs = gameState.value.gameLog
-    const typeCounts: Record<string, number> = {}
-    const phaseCounts: Record<string, number> = {}
-    logs.forEach(l => {
-      typeCounts[l.type] = (typeCounts[l.type] || 0) + 1
-      const pId = (l.details?.phaseId as string) || '__no_phase__'
-      phaseCounts[pId] = (phaseCounts[pId] || 0) + 1
-    })
-    return { typeCounts, phaseCounts }
-  })
-
-  const phaseOptions = computed(() => {
-    const phases = allPhases.value || []
-    return phases.map(p => ({ id: p.id, name: p.name, number: p.phaseNumber }))
-  })
-
-  function setLogFilterType(type: GameLogEntry['type']) {
-    const idx = logFilter.value.types.indexOf(type)
-    if (idx >= 0) {
-      logFilter.value.types.splice(idx, 1)
-    } else {
-      logFilter.value.types.push(type)
-    }
-  }
-
-  function setLogFilterPhase(phaseId: string) {
-    const idx = logFilter.value.phaseIds.indexOf(phaseId)
-    if (idx >= 0) {
-      logFilter.value.phaseIds.splice(idx, 1)
-    } else {
-      logFilter.value.phaseIds.push(phaseId)
-    }
-  }
-
-  function setLogFilterTimeRange(start: number | null, end: number | null) {
-    logFilter.value.timeRange.start = start
-    logFilter.value.timeRange.end = end
-  }
-
-  function setLogSearchQuery(query: string) {
-    logFilter.value.searchQuery = query
-  }
-
-  function clearLogFilter() {
-    logFilter.value = {
-      types: [],
-      phaseIds: [],
-      timeRange: { start: null, end: null },
-      searchQuery: ''
-    }
-    logNavigation.value = { currentIndex: -1, focusedLogId: null }
-  }
-
-  function navigateToLog(logId: string) {
-    const idx = filteredGameLog.value.findIndex(l => l.id === logId)
-    if (idx >= 0) {
-      logNavigation.value.currentIndex = idx
-      logNavigation.value.focusedLogId = logId
-    }
-  }
-
-  function navigateLogPrev() {
-    if (filteredGameLog.value.length === 0) return
-    const newIdx = Math.max(0, logNavigation.value.currentIndex - 1)
-    logNavigation.value.currentIndex = newIdx
-    logNavigation.value.focusedLogId = filteredGameLog.value[newIdx]?.id || null
-  }
-
-  function navigateLogNext() {
-    if (filteredGameLog.value.length === 0) return
-    const newIdx = Math.min(filteredGameLog.value.length - 1, logNavigation.value.currentIndex + 1)
-    logNavigation.value.currentIndex = newIdx
-    logNavigation.value.focusedLogId = filteredGameLog.value[newIdx]?.id || null
-  }
-
-  function navigateLogFirst() {
-    if (filteredGameLog.value.length === 0) return
-    logNavigation.value.currentIndex = 0
-    logNavigation.value.focusedLogId = filteredGameLog.value[0]?.id || null
-  }
-
-  function navigateLogLast() {
-    if (filteredGameLog.value.length === 0) return
-    const lastIdx = filteredGameLog.value.length - 1
-    logNavigation.value.currentIndex = lastIdx
-    logNavigation.value.focusedLogId = filteredGameLog.value[lastIdx]?.id || null
-  }
-
-  function jumpToLogByTime(timestamp: number) {
-    const idx = filteredGameLog.value.findIndex(l => l.timestamp >= timestamp)
-    if (idx >= 0) {
-      logNavigation.value.currentIndex = idx
-      logNavigation.value.focusedLogId = filteredGameLog.value[idx]?.id || null
-    }
   }
 
   function getGameState(): GameState {
@@ -1693,17 +1294,6 @@ export const useGameStore = defineStore('game', () => {
     if (!gameState.value.deductionBranches.includes(branchId)) {
       gameState.value.deductionBranches.push(branchId)
       addLog('conclusion', `解锁推演分支：${branchId}`)
-
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'deduction_branch',
-        `解锁推演分支：${branchId}`,
-        {
-          relatedIds: [branchId],
-          significance: 'major',
-          customName: `[分支] ${branchId}`
-        }
-      )
     }
   }
 
@@ -1730,23 +1320,6 @@ export const useGameStore = defineStore('game', () => {
         if (gameState.value.timerState.remainingSeconds <= 0) {
           handleTimeExpired()
         }
-      }
-      
-      if (tempAnomalyRiskBonus.value?.remainingSeconds !== undefined) {
-        tempAnomalyRiskBonus.value.remainingSeconds--
-        if (tempAnomalyRiskBonus.value.remainingSeconds <= 0) {
-          tempAnomalyRiskBonus.value = null
-        }
-      }
-      if (tempClueAnalysisPenalty.value?.remainingSeconds !== undefined) {
-        tempClueAnalysisPenalty.value.remainingSeconds--
-        if (tempClueAnalysisPenalty.value.remainingSeconds <= 0) {
-          tempClueAnalysisPenalty.value = null
-        }
-      }
-      
-      if (Math.random() < 0.02) {
-        checkAndTriggerSanityRecovery('random')
       }
     }, 1000)
   }
@@ -2096,18 +1669,6 @@ export const useGameStore = defineStore('game', () => {
       unlockedEvidence
     })
 
-    if (mail.isImportant || unlockedClues.length > 0 || unlockedEvidence.length > 0) {
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'mail_read',
-        `阅读邮件：${mail.subject}`,
-        {
-          relatedIds: [mailId, ...unlockedClues, ...unlockedEvidence],
-          significance: mail.isImportant ? 'moderate' : 'minor'
-        }
-      )
-    }
-
     return { success: true, unlockedClues, unlockedEvidence }
   }
 
@@ -2254,18 +1815,6 @@ export const useGameStore = defineStore('game', () => {
       unlockedClues,
       unlockedPages
     })
-
-    if (doc.isClassified || unlockedClues.length > 0 || unlockedPages.length > 1) {
-      const saveStore = useSaveStore()
-      saveStore.createKeySnapshot(
-        'document_read',
-        `阅读文书：${doc.title}`,
-        {
-          relatedIds: [docId, ...unlockedClues],
-          significance: doc.isClassified ? 'major' : 'minor'
-        }
-      )
-    }
 
     return { success: true, unlockedClues, unlockedPages }
   }
@@ -2491,17 +2040,6 @@ export const useGameStore = defineStore('game', () => {
 
     checkMailDelivery('phase_started', phaseId)
     updateDeductionCompleteness()
-
-    const saveStore = useSaveStore()
-    saveStore.createKeySnapshot(
-      'phase_unlocked',
-      `进入新阶段：${phase.name}`,
-      {
-        phaseId,
-        significance: 'major',
-        customName: `[阶段] ${phase.name}`
-      }
-    )
   }
 
   function setActivePhase(phaseId: string) {
@@ -2791,14 +2329,8 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: [],
-      activeSanityRecoveryEvent: null,
-      sanityRecoveryEventCooldown: 0
+      comparisonSelectedClues: []
     }
-    
-    tempEvidencePenalty.value = null
-    tempAnomalyRiskBonus.value = null
-    tempClueAnalysisPenalty.value = null
   }
 
   function generateAnalysisId(): string {
@@ -2978,84 +2510,31 @@ export const useGameStore = defineStore('game', () => {
     if (comparison) {
       if (comparison.supportsConnection) {
         baseRate = Math.max(baseRate, comparison.connectionConfidence)
-        if (comparison.similarities.length > 0) {
-          baseRate += Math.min(comparison.similarities.length * 3, 12)
-        }
       } else {
         baseRate = Math.min(baseRate, 100 - comparison.connectionConfidence)
-        if (comparison.differences.length > 0) {
-          baseRate -= Math.min(comparison.differences.length * 3, 12)
-        }
       }
     }
     
     const avgConfidence = getAverageConfidenceForClues([clue1Id, clue2Id])
-    const confidenceBonus = (avgConfidence - 50) * 0.5
+    const confidenceBonus = (avgConfidence - 50) * 0.3
     baseRate += confidenceBonus
-    
-    const confidence1 = getClueConfidence(clue1Id)
-    const confidence2 = getClueConfidence(clue2Id)
-    if (confidence1 && confidence2) {
-      const bothHigh = confidence1.confidence >= 70 && confidence2.confidence >= 70
-      if (bothHigh) {
-        baseRate += 8
-      }
-      const eitherLow = confidence1.confidence <= 30 || confidence2.confidence <= 30
-      if (eitherLow) {
-        baseRate -= 10
-      }
-      const bothLow = confidence1.confidence <= 30 && confidence2.confidence <= 30
-      if (bothLow) {
-        baseRate -= 8
-      }
-    }
     
     const clue1 = getClueById(clue1Id)
     const clue2 = getClueById(clue2Id)
     if (clue1 && clue2) {
       if (clue1.connections.includes(clue2Id) || clue2.connections.includes(clue1Id)) {
-        baseRate += 20
+        baseRate += 15
       }
-      const typeMatchBonus = clue1.type === clue2.type ? 12 : 0
+      const typeMatchBonus = clue1.type === clue2.type ? 10 : 0
       baseRate += typeMatchBonus
-      const importanceBonus = Math.min((clue1.importance + clue2.importance - 6) * 3, 10)
-      baseRate += importanceBonus
     }
     
     const annotations1 = getAnnotationsForClue(clue1Id)
     const annotations2 = getAnnotationsForClue(clue2Id)
-    const totalAnnotations = annotations1.length + annotations2.length
-    const annotationBonus = Math.min(totalAnnotations * 2, 10)
+    const annotationBonus = Math.min((annotations1.length + annotations2.length) * 3, 15)
     baseRate += annotationBonus
-
-    const contradictionAnnotations1 = annotations1.filter(a => a.type === 'contradiction').length
-    const contradictionAnnotations2 = annotations2.filter(a => a.type === 'contradiction').length
-    const contradictionPenalty = (contradictionAnnotations1 + contradictionAnnotations2) * 5
-    baseRate -= contradictionPenalty
-
-    const hypothesisAnnotations1 = annotations1.filter(a => a.type === 'hypothesis').length
-    const hypothesisAnnotations2 = annotations2.filter(a => a.type === 'hypothesis').length
-    const hypothesisBonus = (hypothesisAnnotations1 + hypothesisAnnotations2) * 2
-    baseRate += hypothesisBonus
-
-    const importantAnnotations1 = annotations1.filter(a => a.type === 'important').length
-    const importantAnnotations2 = annotations2.filter(a => a.type === 'important').length
-    const importantBonus = (importantAnnotations1 + importantAnnotations2) * 3
-    baseRate += importantBonus
-
-    const questionAnnotations1 = annotations1.filter(a => a.type === 'question').length
-    const questionAnnotations2 = annotations2.filter(a => a.type === 'question').length
-    const questionPenalty = (questionAnnotations1 + questionAnnotations2) * 2
-    baseRate -= questionPenalty
-
-    const bothAnalyzed = gameState.value.analyzedClues.includes(clue1Id) && gameState.value.analyzedClues.includes(clue2Id)
-    if (bothAnalyzed) {
-      baseRate += 10
-    } else if (gameState.value.analyzedClues.includes(clue1Id) || gameState.value.analyzedClues.includes(clue2Id)) {
-      baseRate += 5
-    }
     
-    return Math.max(5, Math.min(95, Math.round(baseRate)))
+    return Math.max(10, Math.min(95, Math.round(baseRate)))
   }
 
   function generateDeductionHints(): DeductionHint[] {
@@ -3063,86 +2542,43 @@ export const useGameStore = defineStore('game', () => {
     const now = Date.now()
     
     gameState.value.clueComparisons.forEach(comparison => {
-      const existingConn = gameState.value.clueConnections.find(
-        c => (c.clue1Id === comparison.clue1Id && c.clue2Id === comparison.clue2Id) ||
-             (c.clue1Id === comparison.clue2Id && c.clue2Id === comparison.clue1Id)
-      )
-
       if (comparison.supportsConnection && comparison.connectionConfidence >= 70) {
-        if (!existingConn) {
-          const successRate = getConnectionSuccessRate(comparison.clue1Id, comparison.clue2Id)
+        const exists = gameState.value.clueConnections.some(
+          c => (c.clue1Id === comparison.clue1Id && c.clue2Id === comparison.clue2Id) ||
+               (c.clue1Id === comparison.clue2Id && c.clue2Id === comparison.clue1Id)
+        )
+        if (!exists) {
           hints.push({
             id: generateAnalysisId(),
             type: 'suggestion',
-            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能存在关联（预估连线成功率 ${successRate}%）`,
+            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能存在关联（可信度 ${comparison.connectionConfidence}%）`,
             relatedClues: [comparison.clue1Id, comparison.clue2Id],
             priority: comparison.connectionConfidence,
             source: 'comparison',
             createdAt: now
           })
-        } else if (!existingConn.confirmed) {
-          const currentConf = existingConn.confidence || 50
-          if (currentConf >= 60) {
-            hints.push({
-              id: generateAnalysisId(),
-              type: 'suggestion',
-              content: `「${getClueById(comparison.clue1Id)?.name}」↔「${getClueById(comparison.clue2Id)?.name}」已有比对支持（${comparison.connectionConfidence}%），建议确认该连线`,
-              relatedClues: [comparison.clue1Id, comparison.clue2Id],
-              priority: comparison.connectionConfidence - 10,
-              source: 'comparison',
-              createdAt: now
-            })
-          }
         }
       }
       
       if (!comparison.supportsConnection && comparison.connectionConfidence >= 60) {
-        if (existingConn && existingConn.confirmed) {
-          hints.push({
-            id: generateAnalysisId(),
-            type: 'contradiction',
-            content: `比对结果与已确认的连线矛盾：「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联，请重新审视`,
-            relatedClues: [comparison.clue1Id, comparison.clue2Id],
-            priority: comparison.connectionConfidence + 10,
-            source: 'comparison',
-            createdAt: now
-          })
-        } else if (existingConn) {
-          hints.push({
-            id: generateAnalysisId(),
-            type: 'warning',
-            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联，建议删除或重新比对`,
-            relatedClues: [comparison.clue1Id, comparison.clue2Id],
-            priority: comparison.connectionConfidence,
-            source: 'comparison',
-            createdAt: now
-          })
-        } else {
-          hints.push({
-            id: generateAnalysisId(),
-            type: 'warning',
-            content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联`,
-            relatedClues: [comparison.clue1Id, comparison.clue2Id],
-            priority: comparison.connectionConfidence,
-            source: 'comparison',
-            createdAt: now
-          })
-        }
+        hints.push({
+          id: generateAnalysisId(),
+          type: 'warning',
+          content: `比对结果显示「${getClueById(comparison.clue1Id)?.name}」与「${getClueById(comparison.clue2Id)?.name}」可能不存在关联`,
+          relatedClues: [comparison.clue1Id, comparison.clue2Id],
+          priority: comparison.connectionConfidence,
+          source: 'comparison',
+          createdAt: now
+        })
       }
     })
     
     gameState.value.clueConfidences.forEach(conf => {
       if (conf.confidence <= 30) {
-        const connectedUnconfirmed = gameState.value.clueConnections.filter(
-          c => !c.confirmed && (c.clue1Id === conf.clueId || c.clue2Id === conf.clueId)
-        )
-        const extraNote = connectedUnconfirmed.length > 0 
-          ? `，涉及的 ${connectedUnconfirmed.length} 条未确认连线可能受影响` 
-          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'warning',
-          content: `「${getClueById(conf.clueId)?.name}」的可信度较低（${conf.confidence}%），${conf.reasoning || '需要进一步验证'}${extraNote}`,
+          content: `「${getClueById(conf.clueId)?.name}」的可信度较低（${conf.confidence}%），${conf.reasoning || '需要进一步验证'}`,
           relatedClues: [conf.clueId],
           priority: 100 - conf.confidence,
           source: 'confidence',
@@ -3150,16 +2586,10 @@ export const useGameStore = defineStore('game', () => {
         })
       }
       if (conf.confidence >= 80) {
-        const connectedUnconfirmed = gameState.value.clueConnections.filter(
-          c => !c.confirmed && (c.clue1Id === conf.clueId || c.clue2Id === conf.clueId)
-        )
-        const extraNote = connectedUnconfirmed.length > 0 
-          ? `，可优先确认涉及该线索的 ${connectedUnconfirmed.length} 条连线` 
-          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'insight',
-          content: `「${getClueById(conf.clueId)?.name}」可信度很高（${conf.confidence}%），${conf.reasoning || '可作为核心推理依据'}${extraNote}`,
+          content: `「${getClueById(conf.clueId)?.name}」可信度很高（${conf.confidence}%），${conf.reasoning || '可作为核心推理依据'}`,
           relatedClues: [conf.clueId],
           priority: conf.confidence,
           source: 'confidence',
@@ -3170,18 +2600,12 @@ export const useGameStore = defineStore('game', () => {
     
     gameState.value.clueAnnotations.forEach(annotation => {
       if (annotation.type === 'contradiction') {
-        const connectedConns = gameState.value.clueConnections.filter(
-          c => (c.clue1Id === annotation.clueId || c.clue2Id === annotation.clueId)
-        )
-        const extraNote = connectedConns.length > 0 
-          ? `，该线索的 ${connectedConns.length} 条关联需要谨慎验证` 
-          : ''
         hints.push({
           id: generateAnalysisId(),
           type: 'contradiction',
-          content: `「${getClueById(annotation.clueId)?.name}」存在矛盾：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}${extraNote}`,
+          content: `「${getClueById(annotation.clueId)?.name}」存在矛盾：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
           relatedClues: [annotation.clueId],
-          priority: 85,
+          priority: 80,
           source: 'annotation',
           createdAt: now
         })
@@ -3192,69 +2616,12 @@ export const useGameStore = defineStore('game', () => {
           type: 'suggestion',
           content: `假设：${annotation.content.slice(0, 50)}${annotation.content.length > 50 ? '...' : ''}`,
           relatedClues: [annotation.clueId],
-          priority: 55,
+          priority: 50,
           source: 'annotation',
           createdAt: now
         })
       }
-      if (annotation.type === 'important') {
-        const connectedUnconfirmed = gameState.value.clueConnections.filter(
-          c => !c.confirmed && (c.clue1Id === annotation.clueId || c.clue2Id === annotation.clueId)
-        )
-        if (connectedUnconfirmed.length > 0) {
-          hints.push({
-            id: generateAnalysisId(),
-            type: 'insight',
-            content: `「${getClueById(annotation.clueId)?.name}」被标记为重要线索，建议优先确认其 ${connectedUnconfirmed.length} 条关联连线`,
-            relatedClues: [annotation.clueId],
-            priority: 75,
-            source: 'annotation',
-            createdAt: now
-          })
-        }
-      }
     })
-
-    const unconfirmedConnections = gameState.value.clueConnections.filter(c => !c.confirmed)
-    if (unconfirmedConnections.length > 0) {
-      const highConfidence = unconfirmedConnections.filter(c => (c.confidence || 50) >= 70)
-      if (highConfidence.length > 0) {
-        hints.push({
-          id: generateAnalysisId(),
-          type: 'suggestion',
-          content: `有 ${highConfidence.length} 条连线置信度较高（≥70%），建议优先确认以推进推演`,
-          relatedClues: [],
-          priority: 70,
-          source: 'pattern',
-          createdAt: now
-        })
-      }
-      const lowConfidence = unconfirmedConnections.filter(c => (c.confidence || 50) < 40)
-      if (lowConfidence.length > 0) {
-        hints.push({
-          id: generateAnalysisId(),
-          type: 'warning',
-          content: `有 ${lowConfidence.length} 条连线置信度较低（<40%），建议补充批注、比对或删除可疑连线`,
-          relatedClues: [],
-          priority: 65,
-          source: 'pattern',
-          createdAt: now
-        })
-      }
-    }
-
-    const confirmedConnections = gameState.value.clueConnections.filter(c => c.confirmed)
-    if (confirmedConnections.length > 0 && unconfirmedConnections.length === 0) {
-      hints.push({
-        id: generateAnalysisId(),
-        type: 'insight',
-        content: `所有 ${confirmedConnections.length} 条连线均已确认，可以进入推演阶段得出结论`,
-        relatedClues: [],
-        priority: 90,
-        source: 'pattern',
-        createdAt: now
-      })
-    }
     
     const analyzedCount = gameState.value.analyzedClues.length
     const confidenceCount = gameState.value.clueConfidences.length
@@ -3262,22 +2629,9 @@ export const useGameStore = defineStore('game', () => {
       hints.push({
         id: generateAnalysisId(),
         type: 'suggestion',
-        content: `建议为已分析的线索标记可信度，这将提高连线成功率和推演准确性（已标记 ${confidenceCount}/${analyzedCount}）`,
+        content: `建议为已分析的线索标记可信度，这将提高连线成功率和推演准确性`,
         relatedClues: [],
         priority: 60,
-        source: 'pattern',
-        createdAt: now
-      })
-    }
-
-    const comparisonCount = gameState.value.clueComparisons.length
-    if (analyzedCount >= 4 && comparisonCount < Math.floor(analyzedCount / 2)) {
-      hints.push({
-        id: generateAnalysisId(),
-        type: 'suggestion',
-        content: `建议对已分析的线索进行比对，比对能显著提高连线的成功率（已比对 ${comparisonCount} 组）`,
-        relatedClues: [],
-        priority: 55,
         source: 'pattern',
         createdAt: now
       })
@@ -3297,319 +2651,6 @@ export const useGameStore = defineStore('game', () => {
     if (index === -1) return false
     gameState.value.deductionHints.splice(index, 1)
     return true
-  }
-
-  function checkEvidenceSufficiency(): EvidenceSufficiencyCheck {
-    const caseData = currentCase.value
-    if (!caseData) {
-      return {
-        level: 'insufficient',
-        levelLabel: '数据缺失',
-        evidenceProgress: 0,
-        requiredEvidenceCount: 0,
-        discoveredRequiredCount: 0,
-        missingRequiredEvidence: [],
-        intelligenceCompleteness: 0,
-        clueAnalysisProgress: 0,
-        warnings: ['案件数据加载失败'],
-        canAttemptDeduction: false,
-        recommendedActions: ['请重新进入案件'],
-        scorePenalty: 50,
-        sanityRiskMultiplier: 2.0
-      }
-    }
-
-    const requiredEvidence = caseData.conclusion.evidence
-    const discovered = gameState.value.discoveredEvidence
-    const discoveredRequiredCount = requiredEvidence.filter(e => discovered.includes(e)).length
-    const evidenceProgress = requiredEvidence.length > 0 
-      ? Math.round((discoveredRequiredCount / requiredEvidence.length) * 100) 
-      : 100
-
-    const missingRequiredEvidence = requiredEvidence
-      .filter(e => !discovered.includes(e))
-      .map(evId => {
-        const ev = caseData.scenes.flatMap(s => s.evidence).find(e => e.id === evId)
-        return ev?.name || evId
-      })
-
-    const intelligenceCompleteness = gameState.value.intelligenceState.deductionInfoCompleteness
-    const totalClues = caseData.clues.length
-    const clueAnalysisProgress = totalClues > 0 
-      ? Math.round((gameState.value.analyzedClues.length / totalClues) * 100) 
-      : 100
-
-    let level: EvidenceSufficiencyLevel
-    let levelLabel: string
-    let warnings: string[] = []
-    let canAttemptDeduction: boolean
-    let recommendedActions: string[] = []
-    let scorePenalty: number
-    let sanityRiskMultiplier: number
-
-    if (evidenceProgress >= 100 && intelligenceCompleteness >= 75 && clueAnalysisProgress >= 80) {
-      level = 'overwhelming'
-      levelLabel = '证据确凿'
-      canAttemptDeduction = true
-      scorePenalty = 0
-      sanityRiskMultiplier = 0.8
-      warnings = ['证据链完整，推演条件极佳']
-    } else if (evidenceProgress >= 100 && intelligenceCompleteness >= 50) {
-      level = 'sufficient'
-      levelLabel = '证据充分'
-      canAttemptDeduction = true
-      scorePenalty = 0
-      sanityRiskMultiplier = 1.0
-      if (clueAnalysisProgress < 80) {
-        warnings.push(`线索分析进度较低（${clueAnalysisProgress}%），可能影响推演评分`)
-        recommendedActions.push('继续分析剩余线索')
-      }
-      if (intelligenceCompleteness < 75) {
-        warnings.push(`情报完整度一般（${intelligenceCompleteness}%），部分信息可能缺失`)
-        recommendedActions.push('阅读更多邮件和文档')
-      }
-    } else if (evidenceProgress >= 75 && intelligenceCompleteness >= 35) {
-      level = 'moderate'
-      levelLabel = '证据一般'
-      canAttemptDeduction = true
-      scorePenalty = 10
-      sanityRiskMultiplier = 1.3
-      warnings.push(`仍有 ${requiredEvidence.length - discoveredRequiredCount} 项关键证据未发现`)
-      warnings.push(`情报完整度不足（${intelligenceCompleteness}%），推演存在不确定性`)
-      recommendedActions.push('继续搜索缺失的关键证据')
-      recommendedActions.push('收集更多情报以降低推演风险')
-    } else if (evidenceProgress >= 50 && intelligenceCompleteness >= 20) {
-      level = 'weak'
-      levelLabel = '证据薄弱'
-      canAttemptDeduction = true
-      scorePenalty = 25
-      sanityRiskMultiplier = 1.6
-      warnings.push(`关键证据缺失较多（${discoveredRequiredCount}/${requiredEvidence.length}）`)
-      warnings.push(`情报严重不足，错误推演风险很高`)
-      recommendedActions.push('优先搜索剩余关键证据')
-      recommendedActions.push('分析已有线索以获取更多情报')
-      recommendedActions.push('谨慎推演，可考虑继续调查')
-    } else {
-      level = 'insufficient'
-      levelLabel = '证据不足'
-      canAttemptDeduction = intelligenceCompleteness >= 15
-      scorePenalty = 40
-      sanityRiskMultiplier = 2.0
-      warnings.push(`证据严重不足，仅发现 ${discoveredRequiredCount}/${requiredEvidence.length} 项关键证据`)
-      warnings.push('强行推演极大概率得出错误结论')
-      recommendedActions.push('返回调查场景继续搜证')
-      recommendedActions.push('阅读案件相关邮件和文档')
-      recommendedActions.push('分析已有线索以推进剧情')
-      if (intelligenceCompleteness < 15) {
-        warnings.push('情报极度匮乏，暂无法进行推演')
-      }
-    }
-
-    if (gameState.value.sanity < caseData.conclusion.sanityThreshold) {
-      warnings.push(`理智值不足（当前 ${gameState.value.sanity}/${caseData.conclusion.sanityThreshold}），推演将消耗更多理智`)
-      sanityRiskMultiplier = Math.max(sanityRiskMultiplier, 1.5)
-    }
-
-    return {
-      level,
-      levelLabel,
-      evidenceProgress,
-      requiredEvidenceCount: requiredEvidence.length,
-      discoveredRequiredCount,
-      missingRequiredEvidence,
-      intelligenceCompleteness,
-      clueAnalysisProgress,
-      warnings,
-      canAttemptDeduction,
-      recommendedActions,
-      scorePenalty,
-      sanityRiskMultiplier
-    }
-  }
-
-  function generateDeductionFeedback(
-    option: ConclusionOption,
-    sufficiency: EvidenceSufficiencyCheck
-  ): DeductionFeedback {
-    const isCorrect = option.isCorrect
-    const detailedMessages: string[] = []
-    const suggestions: string[] = []
-    let scoreModifier = -sufficiency.scorePenalty
-    let sanityCostModifier = sufficiency.sanityRiskMultiplier
-
-    let feedbackLevel: DeductionFeedbackLevel
-    let feedbackLevelLabel: string
-    let mainMessage: string
-
-    if (sufficiency.level === 'overwhelming' || sufficiency.level === 'sufficient') {
-      if (isCorrect) {
-        feedbackLevel = 'definite_success'
-        feedbackLevelLabel = '完美推演'
-        mainMessage = option.feedback
-        detailedMessages.push('证据链完整，结论确凿无疑。')
-        detailedMessages.push('所有关键证据均已收集，逻辑无懈可击。')
-        scoreModifier += 5
-      } else {
-        feedbackLevel = 'definite_failure'
-        feedbackLevelLabel = '明显错误'
-        mainMessage = `证据指向了不同的方向。${option.feedback}`
-        detailedMessages.push('在证据充分的情况下，这个结论与现有证据存在明显矛盾。')
-        detailedMessages.push('请重新审视证据间的关联。')
-        suggestions.push('返回线索面板，重新梳理证据之间的关系')
-        suggestions.push('检查是否遗漏了某些证据的细节')
-      }
-    } else if (sufficiency.level === 'moderate') {
-      if (isCorrect) {
-        feedbackLevel = 'probable_success'
-        feedbackLevelLabel = '可能正确'
-        mainMessage = `这个结论与现有证据较为吻合。${option.feedback.slice(0, Math.ceil(option.feedback.length * 0.8))}...`
-        detailedMessages.push('大部分证据支持这一结论，但仍有部分信息缺失。')
-        detailedMessages.push(`若能补全剩余 ${sufficiency.missingRequiredEvidence.length} 项证据，结论将更加稳固。`)
-        suggestions.push('可继续调查以获得更完整的证据链')
-      } else {
-        feedbackLevel = 'probable_failure'
-        feedbackLevelLabel = '可能错误'
-        mainMessage = `现有证据对这一结论的支持度较低。${option.feedback.slice(0, Math.ceil(option.feedback.length * 0.5))}...`
-        detailedMessages.push('虽然证据尚不完整，但已有线索显示此结论存在疑点。')
-        detailedMessages.push('建议补充更多证据后再做判断。')
-        suggestions.push('继续搜索缺失的关键证据')
-        suggestions.push('重新比对线索之间的关联')
-      }
-    } else if (sufficiency.level === 'weak') {
-      if (isCorrect) {
-        feedbackLevel = 'uncertain'
-        feedbackLevelLabel = '存疑结论'
-        mainMessage = `你隐约感到这可能是正确的方向，但证据不足以确信...`
-        detailedMessages.push('由于证据严重不足，即使结论正确也难以令人信服。')
-        detailedMessages.push(`缺失的 ${sufficiency.missingRequiredEvidence.length} 项关键证据可能改变整个判断。`)
-        detailedMessages.push('此推演结果的可信度较低，建议继续调查。')
-        suggestions.push('强烈建议补充证据后重新推演')
-        suggestions.push('重点关注缺失的关键证据')
-      } else {
-        feedbackLevel = 'uncertain'
-        feedbackLevelLabel = '无法判断'
-        mainMessage = `情报严重不足，无法做出可靠判断...`
-        detailedMessages.push('在证据如此匮乏的情况下，几乎无法排除任何可能性。')
-        detailedMessages.push('这个结论可能是错误的，但也不能完全排除巧合的可能。')
-        suggestions.push('立即返回调查，收集更多证据')
-        suggestions.push('不要在证据不足的情况下草率下结论')
-      }
-    } else {
-      feedbackLevel = 'uncertain'
-      feedbackLevelLabel = '盲目推测'
-      mainMessage = isCorrect 
-        ? '在证据极度匮乏的情况下，你凭借直觉做出了判断...' 
-        : '证据严重不足，你的判断如同在黑暗中摸索...'
-      detailedMessages.push('当前证据严重不足，任何结论都缺乏可靠依据。')
-      detailedMessages.push('理智在证据缺失的迷雾中承受着巨大压力。')
-      detailedMessages.push('这更像是一场赌博而非理性推演。')
-      suggestions.push('必须返回调查场景，系统地收集证据')
-      suggestions.push('从基础调查开始，不要急于下结论')
-    }
-
-    if (sufficiency.missingRequiredEvidence.length > 0) {
-      const evList = sufficiency.missingRequiredEvidence.slice(0, 3).join('、')
-      if (sufficiency.intelligenceCompleteness >= 50) {
-        detailedMessages.push(`特别缺失：${evList}${sufficiency.missingRequiredEvidence.length > 3 ? '等' : ''}`)
-      } else if (sufficiency.intelligenceCompleteness >= 25) {
-        detailedMessages.push(`仍有 ${sufficiency.missingRequiredEvidence.length} 项未知证据等待发现`)
-      }
-    }
-
-    if (sufficiency.clueAnalysisProgress < 60) {
-      detailedMessages.push(`线索分析不足（${sufficiency.clueAnalysisProgress}%），可能遗漏了重要关联。`)
-    }
-
-    return {
-      feedbackLevel,
-      feedbackLevelLabel,
-      mainMessage,
-      detailedMessages,
-      missingKeyEvidence: sufficiency.missingRequiredEvidence,
-      scoreModifier,
-      sanityCostModifier,
-      suggestions,
-      isConclusionCorrect: isCorrect
-    }
-  }
-
-  function validateDeduction(optionId: string): DeductionValidationResult {
-    const caseData = currentCase.value
-    if (!caseData) {
-      return {
-        isValid: false,
-        sufficiency: checkEvidenceSufficiency(),
-        feedback: null,
-        blockingReason: '案件数据加载失败'
-      }
-    }
-
-    const option = caseData.conclusion.options.find(o => o.id === optionId)
-    if (!option) {
-      return {
-        isValid: false,
-        sufficiency: checkEvidenceSufficiency(),
-        feedback: null,
-        blockingReason: '推演选项不存在'
-      }
-    }
-
-    const sufficiency = checkEvidenceSufficiency()
-
-    if (gameState.value.sanity < caseData.conclusion.sanityThreshold) {
-      return {
-        isValid: false,
-        sufficiency,
-        feedback: null,
-        blockingReason: `理智值不足（当前 ${gameState.value.sanity}，需要 ${caseData.conclusion.sanityThreshold}）`
-      }
-    }
-
-    if (gameState.value.intelligenceState.deductionInfoCompleteness < 15) {
-      return {
-        isValid: false,
-        sufficiency,
-        feedback: null,
-        blockingReason: '情报极度匮乏，无法进行推演，请先阅读更多邮件和文书'
-      }
-    }
-
-    if (option.requiredTools && option.requiredTools.length > 0) {
-      const missingTools = option.requiredTools.filter(toolId => 
-        !gameState.value.tools.some(t => t.id === toolId && t.uses > 0 && t.durability > 0)
-      )
-      if (missingTools.length > 0) {
-        return {
-          isValid: false,
-          sufficiency,
-          feedback: null,
-          blockingReason: `缺少必要工具：${missingTools.join('、')}`
-        }
-      }
-    }
-
-    if (option.requiredEvidence && option.requiredEvidence.length > 0) {
-      const missingOptionEvidence = option.requiredEvidence.filter(
-        evId => !gameState.value.discoveredEvidence.includes(evId)
-      )
-      if (missingOptionEvidence.length > 0) {
-        return {
-          isValid: false,
-          sufficiency,
-          feedback: null,
-          blockingReason: `此结论需要特殊证据支持，当前缺失：${missingOptionEvidence.length} 项`
-        }
-      }
-    }
-
-    const feedback = generateDeductionFeedback(option, sufficiency)
-
-    return {
-      isValid: true,
-      sufficiency,
-      feedback,
-      blockingReason: null
-    }
   }
 
   return {
@@ -3648,10 +2689,6 @@ export const useGameStore = defineStore('game', () => {
     effectiveMaxSanity,
     shockPercentage,
     erosionPercentage,
-    activeSanityRecoveryEvent: toRef(gameState.value, 'activeSanityRecoveryEvent'),
-    tempEvidencePenalty,
-    tempAnomalyRiskBonus,
-    tempClueAnalysisPenalty,
     startCase,
     modifySanity,
     addPollution,
@@ -3736,29 +2773,6 @@ export const useGameStore = defineStore('game', () => {
     getConnectionSuccessRate,
     generateDeductionHints,
     getDeductionHints,
-    dismissDeductionHint,
-    checkEvidenceSufficiency,
-    generateDeductionFeedback,
-    validateDeduction,
-    triggerCaseFailure,
-    abandonCurrentCase,
-    resolveSanityRecoveryOption,
-    skipSanityRecoveryEvent,
-    logFilter,
-    logNavigation,
-    filteredGameLog,
-    filteredLogStats,
-    phaseOptions,
-    setLogFilterType,
-    setLogFilterPhase,
-    setLogFilterTimeRange,
-    setLogSearchQuery,
-    clearLogFilter,
-    navigateToLog,
-    navigateLogPrev,
-    navigateLogNext,
-    navigateLogFirst,
-    navigateLogLast,
-    jumpToLogByTime
+    dismissDeductionHint
   }
 })

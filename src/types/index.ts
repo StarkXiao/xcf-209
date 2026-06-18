@@ -3,7 +3,7 @@ export interface Case {
   title: string
   description: string
   difficulty: 'easy' | 'normal' | 'hard'
-  status: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
+  status: 'locked' | 'available' | 'in_progress' | 'completed'
   scenes: Scene[]
   clues: Clue[]
   conclusion: Conclusion
@@ -38,9 +38,6 @@ export interface CaseProgress {
   completed: boolean
   completedAt?: number
   playCount: number
-  failedCount: number
-  abandonedCount: number
-  lastStatus?: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
   unlockedBranches: string[]
   bestEnding?: string
   discoveredEvidence: string[]
@@ -65,7 +62,7 @@ export interface ChapterNode {
   id: string
   chapter: number
   title: string
-  status: 'locked' | 'available' | 'in_progress' | 'completed' | 'failed' | 'abandoned' | 'reopened'
+  status: 'locked' | 'available' | 'in_progress' | 'completed'
   prerequisites: string[]
   children: string[]
   isLocked: boolean
@@ -420,104 +417,6 @@ export interface GameState {
   deductionHints: DeductionHint[]
   comparisonMode: boolean
   comparisonSelectedClues: string[]
-  activeSanityRecoveryEvent: SanityRecoveryEvent | null
-  sanityRecoveryEventCooldown: number
-}
-
-export type SanityRecoveryCostType = 
-  | 'time' 
-  | 'evidence_penalty' 
-  | 'pollution_erosion' 
-  | 'tool_durability' 
-  | 'anomaly_risk' 
-  | 'clue_analysis_penalty'
-
-export interface SanityRecoveryOptionCost {
-  type: SanityRecoveryCostType
-  value: number
-  description: string
-}
-
-export interface SanityRecoveryOption {
-  id: string
-  text: string
-  sanityRecovery: number
-  costs: SanityRecoveryOptionCost[]
-  flavorText?: string
-}
-
-export interface SanityRecoveryEvent {
-  id: string
-  name: string
-  description: string
-  triggerContext: 'scene_enter' | 'after_search' | 'low_sanity' | 'random'
-  options: SanityRecoveryOption[]
-  minimumSanityThreshold?: number
-  maximumSanityThreshold?: number
-}
-
-export type SaveType = 'manual' | 'auto' | 'snapshot' | 'checkpoint'
-
-export type KeySnapshotTriggerType = 
-  | 'evidence_discovered' 
-  | 'clue_analyzed' 
-  | 'phase_unlocked' 
-  | 'deduction_branch' 
-  | 'scene_entered' 
-  | 'sanity_threshold' 
-  | 'mail_read' 
-  | 'document_read'
-  | 'tool_acquired'
-  | 'conclusion_reached'
-
-export interface KeySnapshotMetadata {
-  triggerType: KeySnapshotTriggerType
-  triggerDescription: string
-  relatedIds?: string[]
-  phaseId?: string
-  sceneId?: string
-  significance: 'minor' | 'moderate' | 'major' | 'critical'
-}
-
-export interface SaveCoverSummary {
-  caseTitle: string
-  caseDifficulty: string
-  progressPercentage: number
-  phaseName: string
-  currentSceneName: string
-  keyHighlights: string[]
-  moodTag: 'hopeful' | 'tense' | 'dangerous' | 'corrupted' | 'mysterious' | 'victorious'
-  sanityStatus: string
-  timeElapsed: string
-  discoveredCount: {
-    evidence: number
-    clues: number
-    connections: number
-  }
-  endingHint?: string
-}
-
-export interface CaseProgressMetric {
-  metricId: string
-  metricName: string
-  value: number
-  maxValue?: number
-  unit?: string
-  color?: string
-}
-
-export interface CrossCaseComparison {
-  caseIds: string[]
-  comparisonDate: number
-  metrics: {
-    [caseId: string]: CaseProgressMetric[]
-  }
-  overallRanking: {
-    caseId: string
-    score: number
-    rank: number
-  }[]
-  summaryNotes: string[]
 }
 
 export interface SaveData {
@@ -531,15 +430,6 @@ export interface SaveData {
   isNewGamePlus?: boolean
   inheritedTools?: string[]
   characterProfileId?: string
-  saveType: SaveType
-  snapshotMetadata?: KeySnapshotMetadata
-  coverSummary?: SaveCoverSummary
-  playTimeSeconds: number
-  autoSaveConfig?: {
-    intervalMinutes: number
-    enabled: boolean
-  }
-  tags?: string[]
 }
 
 export interface SanityEvent {
@@ -1088,7 +978,6 @@ export type PollutionSource =
   | 'dark_knowledge'
   | 'save_ritual'
   | 'ending_choice'
-  | 'sanity_recovery_cost'
 
 export interface PollutionEvent {
   id: string
@@ -1450,53 +1339,4 @@ export interface ReplayStats {
   keyMomentCount: number
   phaseCount: number
   toolsUsed: string[]
-}
-
-export type EvidenceSufficiencyLevel = 
-  | 'insufficient'
-  | 'weak' 
-  | 'moderate'
-  | 'sufficient'
-  | 'overwhelming'
-
-export interface EvidenceSufficiencyCheck {
-  level: EvidenceSufficiencyLevel
-  levelLabel: string
-  evidenceProgress: number
-  requiredEvidenceCount: number
-  discoveredRequiredCount: number
-  missingRequiredEvidence: string[]
-  intelligenceCompleteness: number
-  clueAnalysisProgress: number
-  warnings: string[]
-  canAttemptDeduction: boolean
-  recommendedActions: string[]
-  scorePenalty: number
-  sanityRiskMultiplier: number
-}
-
-export type DeductionFeedbackLevel =
-  | 'definite_success'
-  | 'probable_success'
-  | 'uncertain'
-  | 'probable_failure'
-  | 'definite_failure'
-
-export interface DeductionFeedback {
-  feedbackLevel: DeductionFeedbackLevel
-  feedbackLevelLabel: string
-  mainMessage: string
-  detailedMessages: string[]
-  missingKeyEvidence: string[]
-  scoreModifier: number
-  sanityCostModifier: number
-  suggestions: string[]
-  isConclusionCorrect: boolean
-}
-
-export interface DeductionValidationResult {
-  isValid: boolean
-  sufficiency: EvidenceSufficiencyCheck
-  feedback: DeductionFeedback | null
-  blockingReason: string | null
 }

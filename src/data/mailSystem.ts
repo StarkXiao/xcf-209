@@ -9,6 +9,8 @@ export function createInitialIntelligenceState() {
     totalIntelligence: 0,
     phaseIntelligence: {},
     sceneUnlockProgress: {},
+    sceneLockStates: {},
+    unlockedSceneHistory: [],
     deductionInfoCompleteness: 0,
     mailNotifications: [],
     documentNotifications: [],

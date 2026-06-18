@@ -48,6 +48,8 @@ export const cases = reactive<Case[]>([
         description: '一座古老的灯塔矗立在悬崖边，塔身布满苔藓和奇怪的刻痕。空气中弥漫着咸腥的海风和一股说不清的腐朽气息。',
         background: 'lighthouse',
         searched: false,
+        sceneOrder: 1,
+        unlockNarrative: '灯塔在黑暗中为你点亮了第一束微光——你的调查，从这里开始。',
         evidence: [
           {
             id: 'evidence-diary',
@@ -182,6 +184,20 @@ export const cases = reactive<Case[]>([
         description: '灯塔旁的一间破旧小屋，屋内一片狼藉，仿佛发生过激烈的挣扎。桌上还摆着半杯已经发霉的咖啡。',
         background: 'cottage',
         searched: false,
+        sceneOrder: 2,
+        locked: true,
+        lockIcon: '🚪',
+        lockedDescription: '小屋的门被从内部反锁，需要找到线索才能进入',
+        unlockNarrative: '你在灯塔中发现了通往小屋的钥匙，门上的锁扣在你手中应声而开。小屋内的景象远比你想象的更加混乱...',
+        unlockConditions: [
+          {
+            type: 'evidence_combo',
+            requiredEvidenceIds: ['evidence-diary'],
+            description: '获取守望者的日记，了解小屋的位置',
+            narrativeHint: '守望者的日记中似乎提到了他在小屋中藏匿的东西...'
+          }
+        ],
+        unlockRewardText: '解锁守望者小屋，可发现更多关于失踪前活动的线索',
         evidence: [
           {
             id: 'evidence-letter',
@@ -285,6 +301,20 @@ export const cases = reactive<Case[]>([
         description: '灯塔下方的海滩上散落着大量死鱼，它们的眼睛都朝着同一个方向——深海。远处，海面上似乎有什么东西在蠕动...',
         background: 'shore',
         searched: false,
+        sceneOrder: 3,
+        locked: true,
+        lockIcon: '🌊',
+        lockedDescription: '通往海滩的小径被落石和藤蔓封住，需要从小屋中找到通路的线索',
+        unlockNarrative: '从小屋中找到的地图揭示了一条通往海滩的隐秘小径。当你踏上黑石海滩的那一刻，咸腥的海风与诡异的低语同时向你袭来...',
+        unlockConditions: [
+          {
+            type: 'evidence_combo',
+            requiredEvidenceIds: ['evidence-letter', 'evidence-photo'],
+            description: '在小屋中发现神秘信件和模糊照片',
+            narrativeHint: '信件中似乎提到了海滩上的异常现象...'
+          }
+        ],
+        unlockRewardText: '解锁黑石海滩，调查深海中的异变源头',
         evidence: [
           {
             id: 'evidence-fish',
@@ -441,14 +471,22 @@ export const cases = reactive<Case[]>([
         description: '穿过光门后，你来到了一个不该存在于现实中的空间。一座古老的祭坛矗立在黑暗中，祭坛中央的凹陷处放着一个仍在跳动的心脏——这就是所有异变的源头。空气中弥漫着令人窒息的威压，你能感觉到某种古老的存在正在注视着你...',
         background: 'shore',
         searched: false,
+        sceneOrder: 4,
         locked: true,
+        lockIcon: '🔮',
+        lockedDescription: '这是一个尚未显现于现实的空间，需要足够的证据才能打开通往那里的门户',
+        isSecretScene: true,
+        unlockNarrative: '当你将所有的线索串联在一起的瞬间，空气开始震颤。深渊之门在你面前缓缓开启，门后传来的心跳声与你自己的脉搏产生了诡异的共鸣。你知道，真正的真相就在门的另一侧...',
         unlockConditions: [
           {
             type: 'evidence_combo',
             requiredEvidenceIds: ['evidence-abyss-gateway', 'evidence-hidden-mark', 'evidence-locked-drawer'],
-            description: '收集深渊之门、隐藏印记和上锁抽屉中的证据'
+            description: '收集深渊之门、隐藏印记和上锁抽屉中的关键证据',
+            narrativeHint: '这些证据似乎都指向同一个方向——某个被刻意隐藏的空间...'
           }
         ],
+        unlockRewardText: '解锁深渊祭坛，直面所有异变的核心真相',
+        unlockBgm: 'abyss_theme',
         evidence: [
           {
             id: 'evidence-altar-heart',
@@ -748,6 +786,8 @@ export const cases = reactive<Case[]>([
         description: '一间隐藏在图书馆地下的圆形阅览室，书架上摆满了用未知文字书写的古籍。空气中弥漫着铁锈和陈旧羊皮纸的气味，墙壁上的烛台发出不自然的绿光。',
         background: 'cottage',
         searched: false,
+        sceneOrder: 1,
+        unlockNarrative: '图书馆管理员为你打开了通往地下的铁门——石阶向下延伸，烛火在风中摇曳，知识的气味与某种腐朽的气息交织在一起...',
         evidence: [
           {
             id: 'evidence-ngplus-star-chamber-letter',
@@ -853,6 +893,26 @@ export const cases = reactive<Case[]>([
         description: '通过暗门后进入的房间，比阅览室更加深邃。这里的书架似乎延伸到无边的黑暗中，一些书本会自行从架子上掉落，仿佛有看不见的手在翻阅它们。',
         background: 'lighthouse',
         searched: false,
+        sceneOrder: 2,
+        locked: true,
+        lockIcon: '📚',
+        lockedDescription: '通往档案室的暗门需要特定的钥匙和知识才能打开',
+        unlockNarrative: '暗门在你手中缓缓打开，一股陈旧而危险的气息扑面而来。这里存放的不是普通的书籍——每一本都是一扇通往未知的门扉，而守护者之影，正在黑暗深处注视着你的到来...',
+        unlockConditions: [
+          {
+            type: 'evidence_combo',
+            requiredEvidenceIds: ['evidence-hidden-door', 'evidence-librarian-notes'],
+            description: '发现暗门并获得管理员笔记',
+            narrativeHint: '管理员笔记中似乎记录了打开暗门的方法...'
+          },
+          {
+            type: 'tool_owned',
+            requiredToolIds: ['tool-lockpick'],
+            description: '拥有开锁工具以打开暗门',
+            narrativeHint: '暗门上的锁需要特殊工具才能撬开...'
+          }
+        ],
+        unlockRewardText: '解锁禁忌档案室，接触更高等级的危险知识',
         evidence: [
           {
             id: 'evidence-self-writing',
@@ -1104,6 +1164,8 @@ export const cases = reactive<Case[]>([
         description: '画家生前工作的画室，到处散落着颜料和画布。空气中弥漫着松节油和一种说不出的甜腻气味。最引人注目的是画架上那幅未完成的画...',
         background: 'cottage',
         searched: false,
+        sceneOrder: 1,
+        unlockNarrative: '警察为你移开了画室门口的警戒线。门后的空气黏稠得像糖浆，而那幅传说中的画作，正在画架上静静地等待着你...',
         evidence: [
           {
             id: 'evidence-final-painting',
@@ -1193,6 +1255,26 @@ export const cases = reactive<Case[]>([
         description: '曾经展出过画家作品的画廊。所有观众都报告做了相同的噩梦，画廊因此关闭。空荡的展厅中，墙壁上似乎还残留着画作的影子。',
         background: 'shore',
         searched: false,
+        sceneOrder: 2,
+        locked: true,
+        lockIcon: '🖼️',
+        lockedDescription: '画廊被警方封锁，需要画家留下的线索才能获得进入权限',
+        unlockNarrative: '你从画家日记中发现了画廊的后门钥匙，以及一张写着"不要回头看"的纸条。当你踏入空荡的展厅时，墙上的空白画框仿佛在向你发出无声的邀请——那些从未存在过的画作，正在等着你...',
+        unlockConditions: [
+          {
+            type: 'evidence_combo',
+            requiredEvidenceIds: ['evidence-painter-diary', 'evidence-paint-analysis'],
+            description: '获取画家日记并分析异常颜料',
+            narrativeHint: '日记中似乎提到了画廊的秘密...'
+          },
+          {
+            type: 'clue_analyzed',
+            requiredClueIds: ['clue-geometry'],
+            description: '分析不可能几何线索',
+            narrativeHint: '理解那个图案的本质，或许能找到进入画廊的方法...'
+          }
+        ],
+        unlockRewardText: '解锁噩梦画廊，调查画作对现实世界的影响',
         evidence: [
           {
             id: 'evidence-viewer-records',
