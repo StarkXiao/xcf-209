@@ -480,6 +480,7 @@ export interface GameState {
   deductionHints: DeductionHint[]
   comparisonMode: boolean
   comparisonSelectedClues: string[]
+  wrongDeductionAttempts: number
 }
 
 export type SaveType = 'manual' | 'auto' | 'snapshot' | 'checkpoint'
@@ -1178,6 +1179,29 @@ export type EndingAlignment =
   | 'corrupted'
   | 'fully_insane'
   | 'martyr'
+  | 'hasty_conclusion'
+  | 'false_prophet'
+  | 'lucky_break'
+  | 'self_deceived'
+  | 'compromised'
+  | 'intuition_guided'
+  | 'grasping_straws'
+  | 'shattered_mind'
+  | 'abyss_plaything'
+
+export interface EndingEvidenceRequirement {
+  minEvidenceRatio?: number
+  maxEvidenceRatio?: number
+  minKeyEvidenceCount?: number
+  maxMissingKeyEvidence?: number
+}
+
+export interface EndingChoiceRequirement {
+  requiresCorrectConclusion?: boolean
+  requiresWrongConclusion?: boolean
+  minWrongDeductionAttempts?: number
+  maxWrongDeductionAttempts?: number
+}
 
 export interface EndingPollutionRequirement {
   maxShortTermShock?: number
@@ -1193,8 +1217,14 @@ export interface EndingDescriptor {
   description: string
   pollutionRequirement: EndingPollutionRequirement
   sanityRequirement: { min?: number; max?: number }
+  evidenceRequirement?: EndingEvidenceRequirement
+  choiceRequirement?: EndingChoiceRequirement
   scoreModifier: number
   unlocksBranches?: string[]
+  endingFlavor?: {
+    tone: 'hopeful' | 'neutral' | 'melancholic' | 'tragic' | 'terrifying'
+    truthRevealLevel: 'full' | 'partial' | 'obscured' | 'none' | 'distorted' | 'hidden'
+  }
 }
 
 export interface SpiritualPollutionState {
@@ -1597,6 +1627,33 @@ export interface EvidenceSufficiencyResult {
 }
 
 export type EvidenceSufficiencyCheck = EvidenceSufficiencyResult
+
+export interface EndingDeterminationContext {
+  evidenceRatio: number
+  keyEvidenceDiscoveredCount: number
+  keyEvidenceTotalCount: number
+  missingKeyEvidenceIds: string[]
+  isCorrectConclusion: boolean
+  wrongDeductionAttempts: number
+  analyzedClueRatio: number
+  clueConnectionRatio: number
+}
+
+export type EndingCategory = 
+  | 'perfect_truth'
+  | 'flawed_success'
+  | 'compromised'
+  | 'tragic_failure'
+  | 'psychological_breakdown'
+
+export interface EndingConsequenceSummary {
+  category: EndingCategory
+  justiceServed: boolean
+  truthLevel: 'full' | 'partial' | 'distorted' | 'hidden'
+  detectiveFate: string
+  perpetratorFate: string
+  collateralDamage: string[]
+}
 
 export type LogType = 
   | 'discovery' 

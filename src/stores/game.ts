@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, TempStatusEffect, DeductionValidationResult, EvidenceSufficiencyResult, LogFilterState, LogNavigationState, LogType, DeductionFeedback, SceneUnlockConditionProgress } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, TempStatusEffect, DeductionValidationResult, EvidenceSufficiencyResult, LogFilterState, LogNavigationState, LogType, DeductionFeedback, SceneUnlockConditionProgress, EndingDeterminationContext, EndingConsequenceSummary } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -32,6 +32,7 @@ import {
   calculatePollutionFromSanityLoss,
   calculateDecay,
   determineEndingAlignment,
+  generateEndingConsequenceSummary,
   CORRUPTION_MILESTONES
 } from '@/data/spiritualPollution'
 
@@ -126,6 +127,7 @@ export const useGameStore = defineStore('game', () => {
     deductionHints: [],
     comparisonMode: false,
     comparisonSelectedClues: [],
+    wrongDeductionAttempts: 0,
     activeSanityRecoveryEvent: null,
     sanityRecoveryEventCooldown: 0
   })
@@ -334,6 +336,7 @@ export const useGameStore = defineStore('game', () => {
       deductionHints: [],
       comparisonMode: false,
       comparisonSelectedClues: [],
+      wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
       sanityRecoveryEventCooldown: 0
     }
@@ -1451,12 +1454,55 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.timerState.totalSeconds - gameState.value.timerState.remainingSeconds
   }
 
+  function buildEndingContext(isCorrectConclusion: boolean): EndingDeterminationContext {
+    const caseData = currentCase.value
+    if (!caseData) {
+      return {
+        evidenceRatio: 0,
+        keyEvidenceDiscoveredCount: 0,
+        keyEvidenceTotalCount: 0,
+        missingKeyEvidenceIds: [],
+        isCorrectConclusion,
+        wrongDeductionAttempts: gameState.value.wrongDeductionAttempts,
+        analyzedClueRatio: 0,
+        clueConnectionRatio: 0
+      }
+    }
+
+    const totalEvidence = caseData.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
+    const discoveredEvidence = gameState.value.discoveredEvidence.length
+    const evidenceRatio = totalEvidence > 0 ? discoveredEvidence / totalEvidence : 0
+
+    const requiredKeyEvidence = caseData.conclusion.evidence
+    const keyEvidenceDiscoveredCount = requiredKeyEvidence.filter(e => gameState.value.discoveredEvidence.includes(e)).length
+    const keyEvidenceTotalCount = requiredKeyEvidence.length
+    const missingKeyEvidenceIds = requiredKeyEvidence.filter(e => !gameState.value.discoveredEvidence.includes(e))
+
+    const discoveredClues = gameState.value.discoveredClues.length
+    const analyzedClueRatio = discoveredClues > 0 ? gameState.value.analyzedClues.length / discoveredClues : 0
+
+    const totalClueCount = Math.max(5, caseData.clues.length * 0.6)
+    const clueConnectionRatio = Math.min(1, gameState.value.clueConnections.length / totalClueCount)
+
+    return {
+      evidenceRatio,
+      keyEvidenceDiscoveredCount,
+      keyEvidenceTotalCount,
+      missingKeyEvidenceIds,
+      isCorrectConclusion,
+      wrongDeductionAttempts: gameState.value.wrongDeductionAttempts,
+      analyzedClueRatio,
+      clueConnectionRatio
+    }
+  }
+
   function getEndingDescriptor(isCorrectConclusion: boolean): EndingDescriptor {
+    const context = buildEndingContext(isCorrectConclusion)
     return determineEndingAlignment(
       gameState.value.spiritualPollution,
       gameState.value.sanity,
       gameState.value.maxSanity,
-      isCorrectConclusion
+      context
     )
   }
 
@@ -1481,24 +1527,63 @@ export const useGameStore = defineStore('game', () => {
       }
     }
 
+    const endingContext = buildEndingContext(isCorrectConclusion)
     const ending = getEndingDescriptor(isCorrectConclusion)
+    const consequenceSummary: EndingConsequenceSummary = generateEndingConsequenceSummary(ending, endingContext)
+
     addLog('conclusion', `🏆 结局倾向：${ending.name}`)
     addLog('conclusion', ending.description)
 
+    if (ending.endingFlavor) {
+      const toneLabels: Record<string, string> = {
+        hopeful: '✨ 基调：充满希望',
+        neutral: '📄 基调：中性陈述',
+        melancholic: '🌧️ 基调：阴郁惆怅',
+        tragic: '💔 基调：悲剧收场',
+        terrifying: '👁️ 基调：不可名状'
+      }
+      addLog('conclusion', toneLabels[ending.endingFlavor.tone] || '')
+    }
+
+    addLog('conclusion', `📋 收束分析：侦探命运——${consequenceSummary.detectiveFate}`)
+    addLog('conclusion', `⚖️ 收束分析：真凶下场——${consequenceSummary.perpetratorFate}`)
+    if (consequenceSummary.collateralDamage.length > 0) {
+      addLog('conclusion', `⚠️ 附带影响：${consequenceSummary.collateralDamage.join('；')}`)
+    }
+
+    const {
+      evidenceRatio,
+      keyEvidenceDiscoveredCount,
+      keyEvidenceTotalCount,
+      missingKeyEvidenceIds,
+      analyzedClueRatio,
+      clueConnectionRatio
+    } = endingContext
+
     const totalEvidence = caseData.scenes.reduce((sum, s) => sum + s.evidence.length, 0)
     const discoveredEvidence = gameState.value.discoveredEvidence.length
-    const evidenceRatio = totalEvidence > 0 ? discoveredEvidence / totalEvidence : 0
     const evidenceScore = Math.round(evidenceRatio * DEFAULT_SCORE_CONFIG.evidenceWeight * 100 / 30)
+
+    addLog('conclusion', `🔍 证据收集：${discoveredEvidence}/${totalEvidence} (${(evidenceRatio * 100).toFixed(0)}%)`)
+    if (keyEvidenceTotalCount > 0) {
+      addLog('conclusion', `🔑 关键证据：${keyEvidenceDiscoveredCount}/${keyEvidenceTotalCount}`)
+      if (missingKeyEvidenceIds.length > 0) {
+        addLog('conclusion', `❌ 缺失关键证据：${missingKeyEvidenceIds.length}项`)
+      }
+    }
+
+    if (gameState.value.wrongDeductionAttempts > 0) {
+      addLog('conclusion', `🧠 推演失误：${gameState.value.wrongDeductionAttempts}次`)
+    }
 
     const totalClues = caseData.clues.length
     const discoveredClues = gameState.value.discoveredClues.length
     const clueRatio = totalClues > 0 ? discoveredClues / totalClues : 0
     const clueScore = Math.round(clueRatio * DEFAULT_SCORE_CONFIG.clueWeight * 100 / 20)
 
-    const analyzedRatio = discoveredClues > 0 ? gameState.value.analyzedClues.length / discoveredClues : 0
     const connectionBonus = Math.min(gameState.value.clueConnections.length * 2, 10)
     const deductionBaseScore = isCorrectConclusion ? DEFAULT_SCORE_CONFIG.deductionWeight * 100 / 20 : 0
-    const deductionScore = Math.round(deductionBaseScore * (0.5 + analyzedRatio * 0.5)) + connectionBonus
+    const deductionScore = Math.round(deductionBaseScore * (0.5 + analyzedClueRatio * 0.5)) + connectionBonus
 
     const usedTime = getUsedTime()
     const totalTime = gameState.value.timerState.totalSeconds || caseData.timeLimit.totalSeconds
@@ -1534,6 +1619,11 @@ export const useGameStore = defineStore('game', () => {
     } else if (intelligenceCompleteness >= 50) {
       bonusScore += 5
     }
+
+    if (analyzedClueRatio >= 0.9 && clueConnectionRatio >= 0.8) {
+      bonusScore += 5
+      addLog('bonus', '完美推演奖励：+5 分（线索分析与关联质量极佳）')
+    }
     
     bonusScore = Math.round(bonusScore * DEFAULT_SCORE_CONFIG.bonusMultiplier)
 
@@ -1551,6 +1641,18 @@ export const useGameStore = defineStore('game', () => {
     
     if (!isCorrectConclusion) {
       penaltyScore += 10
+    }
+
+    if (missingKeyEvidenceIds.length > 0) {
+      const keyEvidencePenalty = missingKeyEvidenceIds.length * 5
+      penaltyScore += keyEvidencePenalty
+      addLog('penalty', `缺失关键证据惩罚：-${keyEvidencePenalty} 分`)
+    }
+
+    if (gameState.value.wrongDeductionAttempts > 0) {
+      const wrongDeductionPenalty = Math.min(gameState.value.wrongDeductionAttempts * 3, 15)
+      penaltyScore += wrongDeductionPenalty
+      addLog('penalty', `推演错误惩罚：-${wrongDeductionPenalty} 分（${gameState.value.wrongDeductionAttempts}次失误）`)
     }
 
     const erosionPenalty = Math.round(gameState.value.spiritualPollution.longTermErosion * 0.15)
@@ -1590,7 +1692,11 @@ export const useGameStore = defineStore('game', () => {
 
     addLog('conclusion', `案件评分：${grade}级 (${totalScore}分) [结局修正：${endingModifier > 0 ? '+' : ''}${endingModifier}]`, {
       breakdown: { evidenceScore, clueScore, deductionScore, timeScore, sanityScore, bonusScore, penaltyScore },
-      ending: ending.id
+      ending: ending.id,
+      endingContext: {
+        ...endingContext,
+        consequenceSummary
+      }
     })
 
     if (ending.unlocksBranches) {
@@ -2465,6 +2571,7 @@ export const useGameStore = defineStore('game', () => {
       deductionHints: [],
       comparisonMode: false,
       comparisonSelectedClues: [],
+      wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
       sanityRecoveryEventCooldown: 0
     }
@@ -2648,6 +2755,9 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const isCorrect = option.isCorrect
+    if (!isCorrect) {
+      gameState.value.wrongDeductionAttempts++
+    }
     const feedback: DeductionFeedback = {
       isConclusionCorrect: isCorrect,
       mainMessage: isCorrect ? option.feedback : '你的推理存在漏洞...',
@@ -3134,6 +3244,7 @@ export const useGameStore = defineStore('game', () => {
     effectiveMaxSanity,
     shockPercentage,
     erosionPercentage,
+    buildEndingContext,
     startCase,
     modifySanity,
     addPollution,
