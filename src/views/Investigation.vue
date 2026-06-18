@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, toRef } from 'vue'
+import { ref, computed, onMounted, watch, toRef, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
@@ -31,6 +31,7 @@ const showGameLog = ref(false)
 const logSearchInput = ref('')
 const logTimeStartInput = ref('')
 const logTimeEndInput = ref('')
+const logListContainer = ref<HTMLElement | null>(null)
 
 const LOG_TYPE_OPTIONS: { type: string; label: string }[] = [
   { type: 'discovery', label: '🔍 发现' },
@@ -87,6 +88,60 @@ function getPhaseNameForLog(phaseId: string | undefined): string {
   const phase = gameStore.phaseOptions.find(p => p.id === phaseId)
   return phase ? `阶段${phase.number}：${phase.name}` : phaseId
 }
+
+async function scrollToFocusedLog() {
+  const focusedId = gameStore.logNavigation.focusedLogId
+  if (!focusedId) return
+
+  await nextTick()
+
+  const container = logListContainer.value
+  if (!container) return
+
+  const targetElement = container.querySelector<HTMLElement>(`[data-log-id="${focusedId}"]`)
+  if (!targetElement) return
+
+  targetElement.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+    inline: 'nearest'
+  })
+}
+
+watch(
+  () => gameStore.logNavigation.focusedLogId,
+  (newId) => {
+    if (newId) {
+      scrollToFocusedLog()
+    }
+  }
+)
+
+watch(
+  () => gameStore.filteredGameLog.length,
+  () => {
+    const focusedId = gameStore.logNavigation.focusedLogId
+    if (focusedId) {
+      const exists = gameStore.filteredGameLog.some(l => l.id === focusedId)
+      if (!exists && gameStore.filteredGameLog.length > 0) {
+        const currentIdx = gameStore.logNavigation.currentIndex
+        const newIdx = Math.min(currentIdx, gameStore.filteredGameLog.length - 1)
+        gameStore.navigateToLog(gameStore.filteredGameLog[newIdx].id)
+      }
+    }
+  }
+)
+
+watch(
+  () => showGameLog.value,
+  (isOpen) => {
+    if (isOpen) {
+      if (gameStore.logNavigation.currentIndex < 0 && gameStore.filteredGameLog.length > 0) {
+        gameStore.navigateLogLast()
+      }
+    }
+  }
+)
 
 const activeTab = ref<'investigation' | 'mails' | 'documents' | 'phases'>('investigation')
 
@@ -964,11 +1019,12 @@ function handleSkipRecovery() {
               <button class="nav-btn" @click="gameStore.navigateLogLast()" title="最新">⏭</button>
             </div>
 
-            <div class="log-list-container">
+            <div class="log-list-container" ref="logListContainer">
               <div class="log-list">
                 <div 
                   v-for="log in gameStore.filteredGameLog.slice().reverse()" 
                   :key="log.id"
+                  :data-log-id="log.id"
                   class="log-entry"
                   :class="[
                     `log-type-${log.type}`,
