@@ -1451,3 +1451,52 @@ export interface ReplayStats {
   phaseCount: number
   toolsUsed: string[]
 }
+
+export type EvidenceSufficiencyLevel = 
+  | 'insufficient'
+  | 'weak' 
+  | 'moderate'
+  | 'sufficient'
+  | 'overwhelming'
+
+export interface EvidenceSufficiencyCheck {
+  level: EvidenceSufficiencyLevel
+  levelLabel: string
+  evidenceProgress: number
+  requiredEvidenceCount: number
+  discoveredRequiredCount: number
+  missingRequiredEvidence: string[]
+  intelligenceCompleteness: number
+  clueAnalysisProgress: number
+  warnings: string[]
+  canAttemptDeduction: boolean
+  recommendedActions: string[]
+  scorePenalty: number
+  sanityRiskMultiplier: number
+}
+
+export type DeductionFeedbackLevel =
+  | 'definite_success'
+  | 'probable_success'
+  | 'uncertain'
+  | 'probable_failure'
+  | 'definite_failure'
+
+export interface DeductionFeedback {
+  feedbackLevel: DeductionFeedbackLevel
+  feedbackLevelLabel: string
+  mainMessage: string
+  detailedMessages: string[]
+  missingKeyEvidence: string[]
+  scoreModifier: number
+  sanityCostModifier: number
+  suggestions: string[]
+  isConclusionCorrect: boolean
+}
+
+export interface DeductionValidationResult {
+  isValid: boolean
+  sufficiency: EvidenceSufficiencyCheck
+  feedback: DeductionFeedback | null
+  blockingReason: string | null
+}

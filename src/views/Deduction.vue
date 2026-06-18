@@ -7,7 +7,7 @@ import { useProgressStore } from '@/stores/progress'
 import { useNewGamePlusStore } from '@/stores/newGamePlus'
 import { getCaseById, getEvidenceById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
-import type { ConclusionOption, CaseRewards, CaseScoreBreakdown, DeductionHint } from '@/types'
+import type { ConclusionOption, CaseRewards, CaseScoreBreakdown, DeductionHint, EvidenceSufficiencyCheck, DeductionFeedback } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -29,6 +29,8 @@ const newlyUnlockedCases = ref<string[]>([])
 const caseScore = ref<CaseScoreBreakdown | null>(null)
 const usedTime = ref(0)
 const showAnalysisHints = ref(true)
+const currentSufficiency = ref<EvidenceSufficiencyCheck | null>(null)
+const currentDeductionFeedback = ref<DeductionFeedback | null>(null)
 
 const caseData = computed(() => {
   const caseId = route.params.caseId as string
@@ -174,13 +176,59 @@ const canDeduce = computed(() => {
   const option = caseData.value.conclusion.options.find(o => o.id === selectedConclusion.value)
   if (!option) return false
   
-  if (!hasEnoughEvidence.value) return false
-  if (gameStore.gameState.sanity < caseData.value.conclusion.sanityThreshold) return false
-  if (!isOptionAvailable(option)) return false
+  const validation = gameStore.validateDeduction(selectedConclusion.value)
+  if (!validation.isValid) return false
+  
   if (intelligenceCompleteness.value < 15) return false
   
   return true
 })
+
+const evidenceSufficiency = computed(() => {
+  return gameStore.checkEvidenceSufficiency()
+})
+
+function getSufficiencyColor(level: string): string {
+  const colors: Record<string, string> = {
+    'overwhelming': '#4caf50',
+    'sufficient': '#8bc34a',
+    'moderate': '#ffc107',
+    'weak': '#ff9800',
+    'insufficient': '#f44336'
+  }
+  return colors[level] || '#888'
+}
+
+function getSufficiencyIcon(level: string): string {
+  const icons: Record<string, string> = {
+    'overwhelming': '🏆',
+    'sufficient': '✅',
+    'moderate': '⚠️',
+    'weak': '❗',
+    'insufficient': '❌'
+  }
+  return icons[level] || '📊'
+}
+
+function getCannotDeduceReason(): string {
+  if (!selectedConclusion.value || !caseData.value) return ''
+  
+  const validation = gameStore.validateDeduction(selectedConclusion.value)
+  if (!validation.isValid && validation.blockingReason) {
+    return validation.blockingReason
+  }
+  
+  if (intelligenceCompleteness.value < 15) {
+    return '情报极度匮乏，无法进行推演！请阅读更多邮件和文书。'
+  }
+  
+  const sufficiency = gameStore.checkEvidenceSufficiency()
+  if (!sufficiency.canAttemptDeduction) {
+    return '证据严重不足，请先收集更多证据后再进行推演。'
+  }
+  
+  return '条件不足，无法推演'
+}
 
 const evidenceProgress = computed(() => {
   if (!caseData.value) return 0
@@ -239,23 +287,6 @@ function getOptionVisibility(option: ConclusionOption): { obscured: boolean; obs
     return '■'
   }).join('')
   return { obscured: true, obscuredText }
-}
-
-function getFeedbackForOption(option: ConclusionOption): string {
-  const completeness = intelligenceCompleteness.value
-  const baseFeedback = option.feedback
-  
-  if (completeness >= 75) return baseFeedback
-  
-  if (option.isCorrect) {
-    if (completeness >= 50) return baseFeedback.slice(0, Math.ceil(baseFeedback.length * 0.7)) + '...'
-    if (completeness >= 25) return '部分真相已浮现，但更多信息仍被迷雾遮蔽...'
-    return '你隐约感到这可能是正确的方向，但情报不足以确信...'
-  }
-  
-  if (completeness >= 50) return baseFeedback.slice(0, Math.ceil(baseFeedback.length * 0.5)) + '...'
-  if (completeness >= 25) return '你无法确认这个判断是否正确，缺少关键情报...'
-  return '情报严重不足，无法做出可靠判断...'
 }
 
 function getOptionIntelligenceHint(option: ConclusionOption): string | null {
@@ -336,15 +367,30 @@ function selectOption(option: ConclusionOption) {
 function makeDeduction() {
   if (!selectedConclusion.value || !caseData.value) return
   
+  const validation = gameStore.validateDeduction(selectedConclusion.value)
+  if (!validation.isValid) {
+    alert(validation.blockingReason || '无法进行推演')
+    return
+  }
+
+  if (!validation.feedback) return
+
   const option = caseData.value.conclusion.options.find(o => o.id === selectedConclusion.value)
   if (!option) return
   
   gameStore.stopTimer()
   usedTime.value = gameStore.getUsedTime()
   
-  isCorrect.value = option.isCorrect
-  resultMessage.value = getFeedbackForOption(option)
-  sanityLost.value = option.sanityCost
+  currentSufficiency.value = validation.sufficiency
+  currentDeductionFeedback.value = validation.feedback
+  
+  isCorrect.value = validation.feedback.isConclusionCorrect
+  resultMessage.value = validation.feedback.mainMessage
+  
+  const baseSanityCost = option.sanityCost
+  const adjustedSanityCost = Math.round(baseSanityCost * validation.feedback.sanityCostModifier)
+  sanityLost.value = adjustedSanityCost
+  
   branchRewards.value = []
   caseRewards.value = null
   isFirstCompletion.value = false
@@ -356,20 +402,30 @@ function makeDeduction() {
     gameStore.unlockDeductionBranch(option.branch)
   }
   
-  if (option.sanityCost > 0) {
-    gameStore.modifySanity(-option.sanityCost, '真相推演')
+  if (adjustedSanityCost > 0) {
+    gameStore.modifySanity(-adjustedSanityCost, '真相推演')
   }
   
-  caseScore.value = gameStore.calculateScore(option.isCorrect, option.id, option.branch)
+  let baseScore = gameStore.calculateScore(validation.feedback.isConclusionCorrect, option.id, option.branch)
+  const finalTotalScore = Math.max(0, baseScore.totalScore + validation.feedback.scoreModifier)
   
-  if (option.isCorrect) {
+  caseScore.value = {
+    ...baseScore,
+    totalScore: finalTotalScore,
+    penaltyScore: baseScore.penaltyScore + Math.max(0, -validation.feedback.scoreModifier),
+    bonusScore: baseScore.bonusScore + Math.max(0, validation.feedback.scoreModifier)
+  }
+  
+  if (validation.feedback.isConclusionCorrect) {
     gameStore.addLog('conclusion', `案件已结案：${caseData.value.title}`, {
       conclusion: option.text,
-      sanityLost: option.sanityCost,
+      sanityLost: adjustedSanityCost,
       branch: option.branch,
       score: caseScore.value.totalScore,
       grade: caseScore.value.grade,
-      intelligenceCompleteness: intelligenceCompleteness.value
+      intelligenceCompleteness: intelligenceCompleteness.value,
+      evidenceSufficiency: validation.sufficiency.levelLabel,
+      feedbackLevel: validation.feedback.feedbackLevelLabel
     })
 
     const prevCompleted = progressStore.getProgress(caseData.value.id)?.completed
@@ -379,7 +435,7 @@ function makeDeduction() {
       caseData.value.id,
       option.id,
       option.branch,
-      option.sanityCost,
+      adjustedSanityCost,
       caseScore.value,
       usedTime.value
     )
@@ -408,6 +464,14 @@ function makeDeduction() {
 
     const saveName = `[结算] ${caseData.value.title} - ${new Date().toLocaleString('zh-CN')}`
     saveStore.createSave(saveName, true)
+  } else {
+    gameStore.addLog('conclusion', `推演结果：${validation.feedback.feedbackLevelLabel} - ${caseData.value.title}`, {
+      conclusion: option.text,
+      sanityLost: adjustedSanityCost,
+      evidenceSufficiency: validation.sufficiency.levelLabel,
+      feedbackLevel: validation.feedback.feedbackLevelLabel,
+      isCorrect: false
+    })
   }
 
   showResult.value = true
@@ -590,9 +654,38 @@ function disproveOption(optionId: string) {
 
       <div class="deduction-content">
         <div class="evidence-check card">
-          <h3 class="check-title">证据收集状态</h3>
+            <h3 class="check-title">证据收集状态</h3>
 
-          <div class="intelligence-section">
+            <div class="sufficiency-section" :style="{ borderLeftColor: getSufficiencyColor(evidenceSufficiency.level) }">
+              <div class="sufficiency-header">
+                <span class="sufficiency-icon">{{ getSufficiencyIcon(evidenceSufficiency.level) }}</span>
+                <div class="sufficiency-info">
+                  <span class="sufficiency-level" :style="{ color: getSufficiencyColor(evidenceSufficiency.level) }">
+                    {{ evidenceSufficiency.levelLabel }}
+                  </span>
+                  <span class="sufficiency-progress">
+                    关键证据: {{ evidenceSufficiency.discoveredRequiredCount }}/{{ evidenceSufficiency.requiredEvidenceCount }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="evidenceSufficiency.warnings.length > 0" class="sufficiency-warnings">
+                <p v-for="(warning, idx) in evidenceSufficiency.warnings" :key="idx" class="sufficiency-warning">
+                  {{ warning }}
+                </p>
+              </div>
+              <div v-if="evidenceSufficiency.recommendedActions.length > 0" class="sufficiency-recommendations">
+                <p class="recommendations-title">💡 建议行动:</p>
+                <ul>
+                  <li v-for="(action, idx) in evidenceSufficiency.recommendedActions" :key="idx">{{ action }}</li>
+                </ul>
+              </div>
+              <div class="sufficiency-metrics">
+                <span class="metric">📊 扣分风险: -{{ evidenceSufficiency.scorePenalty }}分</span>
+                <span class="metric">💜 理智倍率: x{{ evidenceSufficiency.sanityRiskMultiplier.toFixed(1) }}</span>
+              </div>
+            </div>
+
+            <div class="intelligence-section">
             <h4>情报完整度</h4>
             <div class="intelligence-header">
               <span class="intelligence-label" :class="completenessLevel">{{ completenessLabel }}</span>
@@ -832,11 +925,11 @@ function disproveOption(optionId: string) {
             >
               🔍 提交推演
             </button>
-            <p v-if="!canDeduce" class="cannot-deduce">
-              {{ intelligenceCompleteness < 15 ? '情报极度匮乏，无法进行推演！请阅读更多邮件和文书。' :
-                 !hasEnoughEvidence ? '证据不足，无法推演' : 
-                 selectedConclusion ? '条件不足，无法选择此结论' : 
-                 '请选择一个推演结论' }}
+            <p v-if="!canDeduce && selectedConclusion" class="cannot-deduce">
+              {{ getCannotDeduceReason() }}
+            </p>
+            <p v-else-if="!selectedConclusion" class="cannot-deduce">
+              请选择一个推演结论
             </p>
           </div>
         </div>
@@ -915,14 +1008,33 @@ function disproveOption(optionId: string) {
 
       <transition name="fade">
         <div v-if="showResult" class="result-modal" @click.self="closeResult">
-          <div class="result-content card" :class="{ correct: isCorrect, wrong: !isCorrect }">
+          <div class="result-content card" :class="{ correct: isCorrect, wrong: !isCorrect, uncertain: currentDeductionFeedback?.feedbackLevel === 'uncertain' }">
             <div class="result-icon">
-              {{ isCorrect ? '✓' : '✗' }}
+              {{ currentDeductionFeedback?.feedbackLevel === 'uncertain' ? '?' : (isCorrect ? '✓' : '✗') }}
             </div>
             <h2 class="result-title">
-              {{ isCorrect ? '推演正确！' : '推演失败...' }}
+              {{ currentDeductionFeedback?.feedbackLevelLabel || (isCorrect ? '推演正确！' : '推演失败...') }}
             </h2>
             <p v-if="isFirstCompletion" class="first-clear-badge">🏆 首次通关！</p>
+
+            <div v-if="currentSufficiency || currentDeductionFeedback" class="feedback-summary-section">
+              <div v-if="currentSufficiency" class="feedback-sufficiency-info">
+                <span class="sufficiency-tag" :style="{ backgroundColor: getSufficiencyColor(currentSufficiency.level) }">
+                  {{ getSufficiencyIcon(currentSufficiency.level) }} {{ currentSufficiency.levelLabel }}
+                </span>
+                <span class="evidence-count">
+                  证据: {{ currentSufficiency.discoveredRequiredCount }}/{{ currentSufficiency.requiredEvidenceCount }}
+                </span>
+              </div>
+              <div v-if="currentDeductionFeedback" class="feedback-modifiers">
+                <span v-if="currentDeductionFeedback.scoreModifier !== 0" class="score-modifier" :class="currentDeductionFeedback.scoreModifier > 0 ? 'positive' : 'negative'">
+                  {{ currentDeductionFeedback.scoreModifier > 0 ? '+' : '' }}{{ currentDeductionFeedback.scoreModifier }} 分
+                </span>
+                <span v-if="currentDeductionFeedback.sanityCostModifier !== 1.0" class="sanity-modifier">
+                  理智消耗 x{{ currentDeductionFeedback.sanityCostModifier.toFixed(1) }}
+                </span>
+              </div>
+            </div>
 
             <div v-if="caseScore" class="score-section">
               <div 
@@ -973,6 +1085,20 @@ function disproveOption(optionId: string) {
             </div>
 
             <p class="result-message">{{ resultMessage }}</p>
+
+            <div v-if="currentDeductionFeedback && currentDeductionFeedback.detailedMessages.length > 0" class="detailed-feedback-section">
+              <h4 class="feedback-section-title">📋 详细分析</h4>
+              <ul class="detailed-messages">
+                <li v-for="(msg, idx) in currentDeductionFeedback.detailedMessages" :key="idx">{{ msg }}</li>
+              </ul>
+            </div>
+
+            <div v-if="currentDeductionFeedback && currentDeductionFeedback.suggestions.length > 0 && !isCorrect" class="suggestions-section">
+              <h4 class="feedback-section-title">💡 改进建议</h4>
+              <ul class="suggestion-list">
+                <li v-for="(suggestion, idx) in currentDeductionFeedback.suggestions" :key="idx">{{ suggestion }}</li>
+              </ul>
+            </div>
 
             <div v-if="unlockedBranch" class="branch-unlock">
               <span class="branch-icon">🌿</span>
@@ -1158,6 +1284,102 @@ function disproveOption(optionId: string) {
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--color-border);
+}
+
+.sufficiency-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 4px solid var(--color-warning);
+  border-radius: 6px;
+}
+
+.sufficiency-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.sufficiency-icon {
+  font-size: 1.8rem;
+}
+
+.sufficiency-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sufficiency-level {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.sufficiency-progress {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.sufficiency-warnings {
+  margin-bottom: 0.75rem;
+}
+
+.sufficiency-warning {
+  font-size: 0.85rem;
+  color: var(--color-warning);
+  line-height: 1.5;
+  padding: 0.2rem 0;
+}
+
+.sufficiency-recommendations {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  background: rgba(107, 76, 154, 0.1);
+  border-radius: 4px;
+}
+
+.recommendations-title {
+  font-size: 0.85rem;
+  color: var(--color-accent-light);
+  font-weight: bold;
+  margin-bottom: 0.35rem;
+}
+
+.sufficiency-recommendations ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sufficiency-recommendations li {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  line-height: 1.5;
+  padding: 0.15rem 0 0.15rem 1rem;
+  position: relative;
+}
+
+.sufficiency-recommendations li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--color-accent);
+}
+
+.sufficiency-metrics {
+  display: flex;
+  gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.sufficiency-metrics .metric {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
 }
 
 .progress-section {
@@ -1744,6 +1966,123 @@ function disproveOption(optionId: string) {
 .result-content.wrong {
   border-color: var(--color-danger);
   background: rgba(139, 58, 58, 0.1);
+}
+
+.result-content.uncertain {
+  border-color: #ff9800;
+  background: rgba(255, 152, 0, 0.1);
+}
+
+.result-content.uncertain .result-icon {
+  color: #ff9800;
+}
+
+.result-content.uncertain .result-title {
+  color: #ff9800;
+}
+
+.feedback-summary-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.feedback-sufficiency-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sufficiency-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+.evidence-count {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.feedback-modifiers {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.score-modifier, .sanity-modifier {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.score-modifier.positive {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4caf50;
+}
+
+.score-modifier.negative {
+  background: rgba(244, 67, 54, 0.2);
+  color: #f44336;
+}
+
+.sanity-modifier {
+  background: rgba(156, 39, 176, 0.2);
+  color: #ce93d8;
+}
+
+.detailed-feedback-section, .suggestions-section {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.feedback-section-title {
+  font-size: 0.95rem;
+  color: var(--color-accent-light);
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.detailed-messages, .suggestion-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.detailed-messages li, .suggestion-list li {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.6;
+  padding: 0.25rem 0 0.25rem 1.25rem;
+  position: relative;
+}
+
+.detailed-messages li::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--color-accent);
+}
+
+.suggestion-list li::before {
+  content: '💡';
+  position: absolute;
+  left: 0;
+  font-size: 0.75rem;
 }
 
 .result-icon {

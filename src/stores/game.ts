@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, toRef } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, EvidenceSufficiencyCheck, DeductionFeedback, DeductionValidationResult, EvidenceSufficiencyLevel, DeductionFeedbackLevel, ConclusionOption } from '@/types'
 import { getCaseById, setCaseStatus, failCase as failCaseData, abandonCase as abandonCaseData } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -3299,6 +3299,319 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
 
+  function checkEvidenceSufficiency(): EvidenceSufficiencyCheck {
+    const caseData = currentCase.value
+    if (!caseData) {
+      return {
+        level: 'insufficient',
+        levelLabel: '数据缺失',
+        evidenceProgress: 0,
+        requiredEvidenceCount: 0,
+        discoveredRequiredCount: 0,
+        missingRequiredEvidence: [],
+        intelligenceCompleteness: 0,
+        clueAnalysisProgress: 0,
+        warnings: ['案件数据加载失败'],
+        canAttemptDeduction: false,
+        recommendedActions: ['请重新进入案件'],
+        scorePenalty: 50,
+        sanityRiskMultiplier: 2.0
+      }
+    }
+
+    const requiredEvidence = caseData.conclusion.evidence
+    const discovered = gameState.value.discoveredEvidence
+    const discoveredRequiredCount = requiredEvidence.filter(e => discovered.includes(e)).length
+    const evidenceProgress = requiredEvidence.length > 0 
+      ? Math.round((discoveredRequiredCount / requiredEvidence.length) * 100) 
+      : 100
+
+    const missingRequiredEvidence = requiredEvidence
+      .filter(e => !discovered.includes(e))
+      .map(evId => {
+        const ev = caseData.scenes.flatMap(s => s.evidence).find(e => e.id === evId)
+        return ev?.name || evId
+      })
+
+    const intelligenceCompleteness = gameState.value.intelligenceState.deductionInfoCompleteness
+    const totalClues = caseData.clues.length
+    const clueAnalysisProgress = totalClues > 0 
+      ? Math.round((gameState.value.analyzedClues.length / totalClues) * 100) 
+      : 100
+
+    let level: EvidenceSufficiencyLevel
+    let levelLabel: string
+    let warnings: string[] = []
+    let canAttemptDeduction: boolean
+    let recommendedActions: string[] = []
+    let scorePenalty: number
+    let sanityRiskMultiplier: number
+
+    if (evidenceProgress >= 100 && intelligenceCompleteness >= 75 && clueAnalysisProgress >= 80) {
+      level = 'overwhelming'
+      levelLabel = '证据确凿'
+      canAttemptDeduction = true
+      scorePenalty = 0
+      sanityRiskMultiplier = 0.8
+      warnings = ['证据链完整，推演条件极佳']
+    } else if (evidenceProgress >= 100 && intelligenceCompleteness >= 50) {
+      level = 'sufficient'
+      levelLabel = '证据充分'
+      canAttemptDeduction = true
+      scorePenalty = 0
+      sanityRiskMultiplier = 1.0
+      if (clueAnalysisProgress < 80) {
+        warnings.push(`线索分析进度较低（${clueAnalysisProgress}%），可能影响推演评分`)
+        recommendedActions.push('继续分析剩余线索')
+      }
+      if (intelligenceCompleteness < 75) {
+        warnings.push(`情报完整度一般（${intelligenceCompleteness}%），部分信息可能缺失`)
+        recommendedActions.push('阅读更多邮件和文档')
+      }
+    } else if (evidenceProgress >= 75 && intelligenceCompleteness >= 35) {
+      level = 'moderate'
+      levelLabel = '证据一般'
+      canAttemptDeduction = true
+      scorePenalty = 10
+      sanityRiskMultiplier = 1.3
+      warnings.push(`仍有 ${requiredEvidence.length - discoveredRequiredCount} 项关键证据未发现`)
+      warnings.push(`情报完整度不足（${intelligenceCompleteness}%），推演存在不确定性`)
+      recommendedActions.push('继续搜索缺失的关键证据')
+      recommendedActions.push('收集更多情报以降低推演风险')
+    } else if (evidenceProgress >= 50 && intelligenceCompleteness >= 20) {
+      level = 'weak'
+      levelLabel = '证据薄弱'
+      canAttemptDeduction = true
+      scorePenalty = 25
+      sanityRiskMultiplier = 1.6
+      warnings.push(`关键证据缺失较多（${discoveredRequiredCount}/${requiredEvidence.length}）`)
+      warnings.push(`情报严重不足，错误推演风险很高`)
+      recommendedActions.push('优先搜索剩余关键证据')
+      recommendedActions.push('分析已有线索以获取更多情报')
+      recommendedActions.push('谨慎推演，可考虑继续调查')
+    } else {
+      level = 'insufficient'
+      levelLabel = '证据不足'
+      canAttemptDeduction = intelligenceCompleteness >= 15
+      scorePenalty = 40
+      sanityRiskMultiplier = 2.0
+      warnings.push(`证据严重不足，仅发现 ${discoveredRequiredCount}/${requiredEvidence.length} 项关键证据`)
+      warnings.push('强行推演极大概率得出错误结论')
+      recommendedActions.push('返回调查场景继续搜证')
+      recommendedActions.push('阅读案件相关邮件和文档')
+      recommendedActions.push('分析已有线索以推进剧情')
+      if (intelligenceCompleteness < 15) {
+        warnings.push('情报极度匮乏，暂无法进行推演')
+      }
+    }
+
+    if (gameState.value.sanity < caseData.conclusion.sanityThreshold) {
+      warnings.push(`理智值不足（当前 ${gameState.value.sanity}/${caseData.conclusion.sanityThreshold}），推演将消耗更多理智`)
+      sanityRiskMultiplier = Math.max(sanityRiskMultiplier, 1.5)
+    }
+
+    return {
+      level,
+      levelLabel,
+      evidenceProgress,
+      requiredEvidenceCount: requiredEvidence.length,
+      discoveredRequiredCount,
+      missingRequiredEvidence,
+      intelligenceCompleteness,
+      clueAnalysisProgress,
+      warnings,
+      canAttemptDeduction,
+      recommendedActions,
+      scorePenalty,
+      sanityRiskMultiplier
+    }
+  }
+
+  function generateDeductionFeedback(
+    option: ConclusionOption,
+    sufficiency: EvidenceSufficiencyCheck
+  ): DeductionFeedback {
+    const isCorrect = option.isCorrect
+    const detailedMessages: string[] = []
+    const suggestions: string[] = []
+    let scoreModifier = -sufficiency.scorePenalty
+    let sanityCostModifier = sufficiency.sanityRiskMultiplier
+
+    let feedbackLevel: DeductionFeedbackLevel
+    let feedbackLevelLabel: string
+    let mainMessage: string
+
+    if (sufficiency.level === 'overwhelming' || sufficiency.level === 'sufficient') {
+      if (isCorrect) {
+        feedbackLevel = 'definite_success'
+        feedbackLevelLabel = '完美推演'
+        mainMessage = option.feedback
+        detailedMessages.push('证据链完整，结论确凿无疑。')
+        detailedMessages.push('所有关键证据均已收集，逻辑无懈可击。')
+        scoreModifier += 5
+      } else {
+        feedbackLevel = 'definite_failure'
+        feedbackLevelLabel = '明显错误'
+        mainMessage = `证据指向了不同的方向。${option.feedback}`
+        detailedMessages.push('在证据充分的情况下，这个结论与现有证据存在明显矛盾。')
+        detailedMessages.push('请重新审视证据间的关联。')
+        suggestions.push('返回线索面板，重新梳理证据之间的关系')
+        suggestions.push('检查是否遗漏了某些证据的细节')
+      }
+    } else if (sufficiency.level === 'moderate') {
+      if (isCorrect) {
+        feedbackLevel = 'probable_success'
+        feedbackLevelLabel = '可能正确'
+        mainMessage = `这个结论与现有证据较为吻合。${option.feedback.slice(0, Math.ceil(option.feedback.length * 0.8))}...`
+        detailedMessages.push('大部分证据支持这一结论，但仍有部分信息缺失。')
+        detailedMessages.push(`若能补全剩余 ${sufficiency.missingRequiredEvidence.length} 项证据，结论将更加稳固。`)
+        suggestions.push('可继续调查以获得更完整的证据链')
+      } else {
+        feedbackLevel = 'probable_failure'
+        feedbackLevelLabel = '可能错误'
+        mainMessage = `现有证据对这一结论的支持度较低。${option.feedback.slice(0, Math.ceil(option.feedback.length * 0.5))}...`
+        detailedMessages.push('虽然证据尚不完整，但已有线索显示此结论存在疑点。')
+        detailedMessages.push('建议补充更多证据后再做判断。')
+        suggestions.push('继续搜索缺失的关键证据')
+        suggestions.push('重新比对线索之间的关联')
+      }
+    } else if (sufficiency.level === 'weak') {
+      if (isCorrect) {
+        feedbackLevel = 'uncertain'
+        feedbackLevelLabel = '存疑结论'
+        mainMessage = `你隐约感到这可能是正确的方向，但证据不足以确信...`
+        detailedMessages.push('由于证据严重不足，即使结论正确也难以令人信服。')
+        detailedMessages.push(`缺失的 ${sufficiency.missingRequiredEvidence.length} 项关键证据可能改变整个判断。`)
+        detailedMessages.push('此推演结果的可信度较低，建议继续调查。')
+        suggestions.push('强烈建议补充证据后重新推演')
+        suggestions.push('重点关注缺失的关键证据')
+      } else {
+        feedbackLevel = 'uncertain'
+        feedbackLevelLabel = '无法判断'
+        mainMessage = `情报严重不足，无法做出可靠判断...`
+        detailedMessages.push('在证据如此匮乏的情况下，几乎无法排除任何可能性。')
+        detailedMessages.push('这个结论可能是错误的，但也不能完全排除巧合的可能。')
+        suggestions.push('立即返回调查，收集更多证据')
+        suggestions.push('不要在证据不足的情况下草率下结论')
+      }
+    } else {
+      feedbackLevel = 'uncertain'
+      feedbackLevelLabel = '盲目推测'
+      mainMessage = isCorrect 
+        ? '在证据极度匮乏的情况下，你凭借直觉做出了判断...' 
+        : '证据严重不足，你的判断如同在黑暗中摸索...'
+      detailedMessages.push('当前证据严重不足，任何结论都缺乏可靠依据。')
+      detailedMessages.push('理智在证据缺失的迷雾中承受着巨大压力。')
+      detailedMessages.push('这更像是一场赌博而非理性推演。')
+      suggestions.push('必须返回调查场景，系统地收集证据')
+      suggestions.push('从基础调查开始，不要急于下结论')
+    }
+
+    if (sufficiency.missingRequiredEvidence.length > 0) {
+      const evList = sufficiency.missingRequiredEvidence.slice(0, 3).join('、')
+      if (sufficiency.intelligenceCompleteness >= 50) {
+        detailedMessages.push(`特别缺失：${evList}${sufficiency.missingRequiredEvidence.length > 3 ? '等' : ''}`)
+      } else if (sufficiency.intelligenceCompleteness >= 25) {
+        detailedMessages.push(`仍有 ${sufficiency.missingRequiredEvidence.length} 项未知证据等待发现`)
+      }
+    }
+
+    if (sufficiency.clueAnalysisProgress < 60) {
+      detailedMessages.push(`线索分析不足（${sufficiency.clueAnalysisProgress}%），可能遗漏了重要关联。`)
+    }
+
+    return {
+      feedbackLevel,
+      feedbackLevelLabel,
+      mainMessage,
+      detailedMessages,
+      missingKeyEvidence: sufficiency.missingRequiredEvidence,
+      scoreModifier,
+      sanityCostModifier,
+      suggestions,
+      isConclusionCorrect: isCorrect
+    }
+  }
+
+  function validateDeduction(optionId: string): DeductionValidationResult {
+    const caseData = currentCase.value
+    if (!caseData) {
+      return {
+        isValid: false,
+        sufficiency: checkEvidenceSufficiency(),
+        feedback: null,
+        blockingReason: '案件数据加载失败'
+      }
+    }
+
+    const option = caseData.conclusion.options.find(o => o.id === optionId)
+    if (!option) {
+      return {
+        isValid: false,
+        sufficiency: checkEvidenceSufficiency(),
+        feedback: null,
+        blockingReason: '推演选项不存在'
+      }
+    }
+
+    const sufficiency = checkEvidenceSufficiency()
+
+    if (gameState.value.sanity < caseData.conclusion.sanityThreshold) {
+      return {
+        isValid: false,
+        sufficiency,
+        feedback: null,
+        blockingReason: `理智值不足（当前 ${gameState.value.sanity}，需要 ${caseData.conclusion.sanityThreshold}）`
+      }
+    }
+
+    if (gameState.value.intelligenceState.deductionInfoCompleteness < 15) {
+      return {
+        isValid: false,
+        sufficiency,
+        feedback: null,
+        blockingReason: '情报极度匮乏，无法进行推演，请先阅读更多邮件和文书'
+      }
+    }
+
+    if (option.requiredTools && option.requiredTools.length > 0) {
+      const missingTools = option.requiredTools.filter(toolId => 
+        !gameState.value.tools.some(t => t.id === toolId && t.uses > 0 && t.durability > 0)
+      )
+      if (missingTools.length > 0) {
+        return {
+          isValid: false,
+          sufficiency,
+          feedback: null,
+          blockingReason: `缺少必要工具：${missingTools.join('、')}`
+        }
+      }
+    }
+
+    if (option.requiredEvidence && option.requiredEvidence.length > 0) {
+      const missingOptionEvidence = option.requiredEvidence.filter(
+        evId => !gameState.value.discoveredEvidence.includes(evId)
+      )
+      if (missingOptionEvidence.length > 0) {
+        return {
+          isValid: false,
+          sufficiency,
+          feedback: null,
+          blockingReason: `此结论需要特殊证据支持，当前缺失：${missingOptionEvidence.length} 项`
+        }
+      }
+    }
+
+    const feedback = generateDeductionFeedback(option, sufficiency)
+
+    return {
+      isValid: true,
+      sufficiency,
+      feedback,
+      blockingReason: null
+    }
+  }
+
   return {
     gameState,
     currentCase,
@@ -3424,6 +3737,9 @@ export const useGameStore = defineStore('game', () => {
     generateDeductionHints,
     getDeductionHints,
     dismissDeductionHint,
+    checkEvidenceSufficiency,
+    generateDeductionFeedback,
+    validateDeduction,
     triggerCaseFailure,
     abandonCurrentCase,
     resolveSanityRecoveryOption,
