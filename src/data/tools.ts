@@ -173,3 +173,7 @@ export function getSanityPenalty(sanity: number, maxSanity: number): number {
   if (ratio >= 0.3) return 15
   return 25
 }
+
+export function getToolIds(): string[] {
+  return tools.map(t => t.id)
+}

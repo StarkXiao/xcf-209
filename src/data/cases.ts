@@ -1,5 +1,90 @@
-import { reactive } from 'vue'
-import type { Case } from '@/types'
+import { reactive, watch } from 'vue'
+import type { Case, CaseDefinition } from '@/types'
+import {
+  registerCaseDefinition,
+  batchRegisterCaseDefinitions,
+  getCaseDefinition,
+  hasCaseDefinition,
+  getAllCaseDefinitions,
+  getRuntimeState,
+  setCaseStatus as registrySetCaseStatus,
+  getCaseStatus,
+  resetRuntimeState,
+  resetAllRuntimeStates,
+  markEvidenceDiscovered,
+  isEvidenceDiscovered,
+  markSceneSearched,
+  isSceneSearched,
+  setSceneLocked,
+  isSceneLocked,
+  markClueDiscovered,
+  isClueDiscovered,
+  markClueAnalyzed,
+  isClueAnalyzed,
+  hydrateCase,
+  hydrateAllCases,
+  getRegistryStats,
+  validateRegistry,
+  cloneCaseDefinition,
+  createCase,
+  createScene,
+  createEvidence,
+  createClue,
+  applyCasePatch,
+  batchRegisterCaseDefinitions as batchImportCases,
+  findEvidenceByIdGlobally,
+  findClueByIdGlobally,
+  createCaseFromTemplate,
+  registerTemplatePreset,
+  getTemplatePreset,
+  unregisterCaseDefinition,
+  readonlyCaseDefinitions,
+  readonlyRuntimeStates
+} from './caseRegistry'
+import { formatValidationResult } from './caseValidator'
+
+export const caseRegistry = {
+  register: registerCaseDefinition,
+  batchRegister: batchRegisterCaseDefinitions,
+  batchImport: batchImportCases,
+  unregister: unregisterCaseDefinition,
+  getDefinition: getCaseDefinition,
+  has: hasCaseDefinition,
+  getAllDefinitions: getAllCaseDefinitions,
+  getRuntimeState,
+  setStatus: registrySetCaseStatus,
+  getStatus: getCaseStatus,
+  resetRuntimeState,
+  resetAllRuntimeStates,
+  markEvidenceDiscovered,
+  isEvidenceDiscovered,
+  markSceneSearched,
+  isSceneSearched,
+  setSceneLocked,
+  isSceneLocked,
+  markClueDiscovered,
+  isClueDiscovered,
+  markClueAnalyzed,
+  isClueAnalyzed,
+  hydrateCase,
+  hydrateAllCases,
+  getStats: getRegistryStats,
+  validate: validateRegistry,
+  clone: cloneCaseDefinition,
+  createCase,
+  createScene,
+  createEvidence,
+  createClue,
+  applyPatch: applyCasePatch,
+  findEvidence: findEvidenceByIdGlobally,
+  findClue: findClueByIdGlobally,
+  createFromTemplate: createCaseFromTemplate,
+  registerTemplate: registerTemplatePreset,
+  getTemplate: getTemplatePreset,
+  readonlyDefinitions: readonlyCaseDefinitions,
+  readonlyStates: readonlyRuntimeStates,
+  formatValidation: formatValidationResult
+}
 
 export const cases = reactive<Case[]>([
   {
@@ -2178,18 +2263,162 @@ export const cases = reactive<Case[]>([
   }
 ])
 
+let registryInitialized = false
+
+export function initializeCaseRegistry(): void {
+  if (registryInitialized) return
+
+  const caseDefinitions: CaseDefinition[] = cases.map(c => {
+    const { status: _status, scenes: _scenes, clues: _clues, ...rest } = c
+    const scenes = c.scenes.map(s => {
+      const { searched: _s, locked: _l, evidence: _e, ...sceneRest } = s
+      const evidence = s.evidence.map(e => {
+        const { discovered: _d, ...evidenceRest } = e
+        return evidenceRest
+      })
+      return { ...sceneRest, evidence }
+    })
+    const clues = c.clues.map(cl => {
+      const { discovered: _d, analyzed: _a, ...clueRest } = cl
+      return clueRest
+    })
+    return { ...rest, scenes, clues }
+  })
+
+  const importResult = batchRegisterCaseDefinitions(caseDefinitions, { validate: false, stopOnError: false })
+
+  cases.forEach((caseData, index) => {
+    const def = caseDefinitions[index]
+    if (def) {
+      const state = getRuntimeState(def.id)
+      if (state) {
+        state.status = caseData.status
+        caseData.scenes.forEach(scene => {
+          const sceneState = state.sceneStates[scene.id]
+          if (sceneState) {
+            sceneState.searched = scene.searched
+            sceneState.locked = scene.locked ?? false
+            scene.evidence.forEach(e => {
+              if (sceneState.evidenceStates[e.id]) {
+                sceneState.evidenceStates[e.id].discovered = e.discovered
+              }
+            })
+          }
+        })
+        caseData.clues.forEach(clue => {
+          const clueState = state.clueStates[clue.id]
+          if (clueState) {
+            clueState.discovered = clue.discovered
+            clueState.analyzed = clue.analyzed
+          }
+        })
+      }
+    }
+  })
+
+  setupSyncWatchers()
+  registryInitialized = true
+
+  const validation = validateRegistry()
+  if (validation.warningCount > 0 || validation.errorCount > 0) {
+    console.warn('[CaseRegistry] 初始化校验结果:\n' + formatValidationResult(validation))
+  } else {
+    console.log(`[CaseRegistry] 初始化完成，已注册 ${importResult.successCount} 个案件`)
+  }
+}
+
+function setupSyncWatchers(): void {
+  cases.forEach((caseData) => {
+    watch(
+      () => caseData.status,
+      (newStatus) => {
+        registrySetCaseStatus(caseData.id, newStatus)
+      }
+    )
+
+    watch(
+      () => caseData.scenes.map(s => ({ id: s.id, searched: s.searched, locked: s.locked })),
+      (scenes) => {
+        const state = getRuntimeState(caseData.id)
+        if (!state) return
+        scenes.forEach(s => {
+          if (state.sceneStates[s.id]) {
+            state.sceneStates[s.id].searched = s.searched
+            state.sceneStates[s.id].locked = s.locked ?? false
+          }
+        })
+      },
+      { deep: true }
+    )
+
+    caseData.scenes.forEach(scene => {
+      watch(
+        () => scene.evidence.map(e => ({ id: e.id, discovered: e.discovered })),
+        (evidenceList) => {
+          const state = getRuntimeState(caseData.id)
+          if (!state) return
+          const sceneState = state.sceneStates[scene.id]
+          if (!sceneState) return
+          evidenceList.forEach(e => {
+            if (sceneState.evidenceStates[e.id]) {
+              sceneState.evidenceStates[e.id].discovered = e.discovered
+            }
+          })
+        },
+        { deep: true }
+      )
+    })
+
+    watch(
+      () => caseData.clues.map(c => ({ id: c.id, discovered: c.discovered, analyzed: c.analyzed })),
+      (clues) => {
+        const state = getRuntimeState(caseData.id)
+        if (!state) return
+        clues.forEach(c => {
+          if (state.clueStates[c.id]) {
+            state.clueStates[c.id].discovered = c.discovered
+            state.clueStates[c.id].analyzed = c.analyzed
+          }
+        })
+      },
+      { deep: true }
+    )
+  })
+}
+
 export function getCaseById(id: string): Case | undefined {
+  if (registryInitialized) {
+    const hydrated = hydrateCase(id)
+    if (hydrated) return hydrated
+  }
   return cases.find(c => c.id === id)
 }
 
 export function unlockNextCase(currentCaseId: string): void {
   const currentIndex = cases.findIndex(c => c.id === currentCaseId)
   if (currentIndex >= 0 && currentIndex < cases.length - 1) {
-    cases[currentIndex + 1].status = 'available'
+    const nextCase = cases[currentIndex + 1]
+    nextCase.status = 'available'
+    if (registryInitialized) {
+      registrySetCaseStatus(nextCase.id, 'available')
+    }
   }
 }
 
 export function getEvidenceById(caseId: string, evidenceId: string) {
+  if (registryInitialized) {
+    const result = findEvidenceByIdGlobally(evidenceId)
+    if (result && result.caseId === caseId) {
+      const caseData = getCaseById(caseId)
+      if (caseData) {
+        for (const scene of caseData.scenes) {
+          const evidence = scene.evidence.find(e => e.id === evidenceId)
+          if (evidence) return evidence
+        }
+      }
+    }
+  }
+
   const caseData = getCaseById(caseId)
   if (!caseData) return undefined
   
@@ -2205,21 +2434,24 @@ export function completeCase(caseId: string): boolean {
   if (!caseData) return false
   
   caseData.status = 'completed'
+  if (registryInitialized) {
+    registrySetCaseStatus(caseId, 'completed')
+  }
   return true
 }
 
 export function setCaseStatus(caseId: string, status: Case['status']): boolean {
-  const caseData = getCaseById(caseId)
+  const caseData = cases.find(c => c.id === caseId)
   if (!caseData) return false
   
   caseData.status = status
+  if (registryInitialized) {
+    registrySetCaseStatus(caseId, status)
+  }
   return true
 }
 
-export function resetCaseForReplay(caseId: string): boolean {
-  const caseData = getCaseById(caseId)
-  if (!caseData) return false
-
+function _resetCaseState(caseData: Case, status: Case['status']): void {
   caseData.scenes.forEach(scene => {
     scene.searched = false
     scene.evidence.forEach(e => {
@@ -2232,46 +2464,42 @@ export function resetCaseForReplay(caseId: string): boolean {
     clue.analyzed = false
   })
 
-  caseData.status = 'reopened'
+  caseData.status = status
+
+  if (registryInitialized) {
+    resetRuntimeState(caseData.id)
+    registrySetCaseStatus(caseData.id, status)
+  }
+}
+
+export function resetCaseForReplay(caseId: string): boolean {
+  const caseData = cases.find(c => c.id === caseId)
+  if (!caseData) return false
+  _resetCaseState(caseData, 'reopened')
   return true
 }
 
 export function failCase(caseId: string): boolean {
-  const caseData = getCaseById(caseId)
-  if (!caseData) return false
-
-  caseData.status = 'failed'
-  return true
+  return setCaseStatus(caseId, 'failed')
 }
 
 export function abandonCase(caseId: string): boolean {
-  const caseData = getCaseById(caseId)
-  if (!caseData) return false
-
-  caseData.status = 'abandoned'
-  return true
+  return setCaseStatus(caseId, 'abandoned')
 }
 
 export function reopenCase(caseId: string): boolean {
-  const caseData = getCaseById(caseId)
+  const caseData = cases.find(c => c.id === caseId)
   if (!caseData) return false
-
-  caseData.scenes.forEach(scene => {
-    scene.searched = false
-    scene.evidence.forEach(e => {
-      e.discovered = false
-    })
-  })
-
-  caseData.clues.forEach(clue => {
-    clue.discovered = false
-    clue.analyzed = false
-  })
-
-  caseData.status = 'reopened'
+  if (caseData.status !== 'failed' && caseData.status !== 'abandoned' && caseData.status !== 'completed') return false
+  _resetCaseState(caseData, 'reopened')
   return true
 }
 
 export function getAllCases(): Case[] {
+  if (registryInitialized) {
+    return hydrateAllCases()
+  }
   return cases
 }
+
+setTimeout(() => initializeCaseRegistry(), 0)

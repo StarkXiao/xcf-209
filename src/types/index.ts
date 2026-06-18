@@ -1758,3 +1758,93 @@ declare module './index' {
     sideClueGroupDetails: SideClueGroupProgress[]
   }
 }
+
+export interface EvidenceDefinition extends Omit<Evidence, 'discovered'> {}
+
+export interface SceneDefinition extends Omit<Scene, 'searched' | 'locked' | 'evidence'> {
+  evidence: EvidenceDefinition[]
+}
+
+export interface ClueDefinition extends Omit<Clue, 'discovered' | 'analyzed'> {}
+
+export interface CaseDefinition extends Omit<Case, 'status' | 'scenes' | 'clues'> {
+  scenes: SceneDefinition[]
+  clues: ClueDefinition[]
+}
+
+export interface EvidenceRuntimeState {
+  discovered: boolean
+}
+
+export interface SceneRuntimeState {
+  searched: boolean
+  locked: boolean
+  evidenceStates: Record<string, EvidenceRuntimeState>
+}
+
+export interface ClueRuntimeState {
+  discovered: boolean
+  analyzed: boolean
+}
+
+export interface CaseRuntimeState {
+  status: Case['status']
+  sceneStates: Record<string, SceneRuntimeState>
+  clueStates: Record<string, ClueRuntimeState>
+}
+
+export type ValidationSeverity = 'error' | 'warning' | 'info'
+
+export interface ValidationIssue {
+  severity: ValidationSeverity
+  code: string
+  message: string
+  caseId?: string
+  sceneId?: string
+  evidenceId?: string
+  clueId?: string
+  field?: string
+  suggestion?: string
+}
+
+export interface ValidationResult {
+  isValid: boolean
+  issues: ValidationIssue[]
+  errorCount: number
+  warningCount: number
+  infoCount: number
+  summary: string
+}
+
+export interface CaseRegistryStats {
+  totalCases: number
+  totalScenes: number
+  totalEvidence: number
+  totalClues: number
+  casesByDifficulty: Record<string, number>
+  casesByChapter: Record<string, number>
+}
+
+export interface CaseBatchImportResult {
+  successCount: number
+  failCount: number
+  importedIds: string[]
+  failedItems: Array<{ caseData: Partial<CaseDefinition>; errors: ValidationIssue[] }>
+  validation: ValidationResult
+}
+
+export interface CaseTemplatePreset {
+  id: string
+  name: string
+  description: string
+  baseEvidence: EvidenceDefinition[]
+  baseClues: ClueDefinition[]
+  defaultTimeLimit: TimeLimitConfig
+  defaultSanityCost: number
+  defaultRecommendedSanity: number
+}
+
+export type CaseDefinitionPatch = Partial<Omit<CaseDefinition, 'id' | 'scenes' | 'clues'>> & {
+  scenes?: Partial<SceneDefinition>[]
+  clues?: Partial<ClueDefinition>[]
+}
