@@ -3,11 +3,13 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCharacterStore } from '@/stores/character'
 import { useGameStore } from '@/stores/game'
-import { cases } from '@/data/cases'
+import { useProgressStore } from '@/stores/progress'
+import { cases, getCaseById } from '@/data/cases'
 
 const router = useRouter()
 const characterStore = useCharacterStore()
 const gameStore = useGameStore()
+const progressStore = useProgressStore()
 
 const activeProfile = computed(() => characterStore.activeProfile)
 
@@ -35,6 +37,182 @@ const currentCaseInfo = computed(() => {
   const caseData = cases.find(c => c.id === caseId)
   return caseData ? { id: caseId, title: caseData.title, status: caseData.status } : null
 })
+
+const battleStats = computed(() => {
+  const completed = progressStore.totalCompleted
+  const failed = progressStore.totalFailed
+  const abandoned = progressStore.totalAbandoned
+  const total = completed + failed + abandoned
+  const successRate = total > 0 ? Math.round((completed / total) * 100) : 0
+
+  let bestGrade = '-'
+  let totalScore = 0
+  let scoreCount = 0
+  let fastestTime: number | null = null
+  let totalBranches = 0
+
+  Object.values(progressStore.progressMap).forEach(progress => {
+    if (progress.bestGrade) {
+      if (bestGrade === '-' || gradeRank(progress.bestGrade) < gradeRank(bestGrade)) {
+        bestGrade = progress.bestGrade
+      }
+    }
+    if (progress.bestScore) {
+      totalScore += progress.bestScore.totalScore
+      scoreCount++
+    }
+    if (progress.fastestTime !== undefined) {
+      if (fastestTime === null || progress.fastestTime < fastestTime) {
+        fastestTime = progress.fastestTime
+      }
+    }
+    totalBranches += progress.unlockedBranches.length
+  })
+
+  const avgScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : 0
+
+  return {
+    completed,
+    failed,
+    abandoned,
+    total,
+    successRate,
+    bestGrade,
+    avgScore,
+    fastestTime,
+    totalBranches
+  }
+})
+
+function gradeRank(grade: string): number {
+  const ranks: Record<string, number> = { 'S': 0, 'A': 1, 'B': 2, 'C': 3, 'D': 4, 'F': 5 }
+  return ranks[grade] ?? 99
+}
+
+const conclusionPreferences = computed(() => {
+  const endingCounts: Record<string, number> = {}
+  const endingTypes: Record<string, { name: string; icon: string }> = {
+    'truth_seeker': { name: '真相探寻者', icon: '🔍' },
+    'survivor': { name: '生存主义者', icon: '🛡️' },
+    'deep_truth': { name: '深渊凝视者', icon: '👁️' },
+    'cautious': { name: '谨慎派', icon: '⚠️' },
+    'standard': { name: '标准调查', icon: '📋' }
+  }
+
+  let totalEndings = 0
+
+  Object.values(progressStore.progressMap).forEach(progress => {
+    progress.playHistory.forEach(record => {
+      const endingId = record.endingId
+      let type = 'standard'
+      
+      if (endingId.includes('deep-truth') || endingId.includes('deep') || endingId.includes('truth')) {
+        type = 'deep_truth'
+      } else if (endingId.includes('accident') || endingId.includes('escape') || endingId.includes('hallucination')) {
+        type = 'cautious'
+      } else if (endingId.includes('correct') || endingId.includes('ritual') || endingId.includes('forbidden') || endingId.includes('true')) {
+        type = 'truth_seeker'
+      } else if (endingId.includes('survive') || endingId.includes('safe')) {
+        type = 'survivor'
+      }
+
+      endingCounts[type] = (endingCounts[type] || 0) + 1
+      totalEndings++
+    })
+  })
+
+  const sorted = Object.entries(endingCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, count]) => ({
+      type,
+      name: endingTypes[type]?.name || type,
+      icon: endingTypes[type]?.icon || '📄',
+      count,
+      percentage: totalEndings > 0 ? Math.round((count / totalEndings) * 100) : 0
+    }))
+
+  const dominantStyle = sorted.length > 0 ? sorted[0] : null
+
+  return {
+    preferences: sorted,
+    totalEndings,
+    dominantStyle
+  }
+})
+
+const caseCompletionProfile = computed(() => {
+  const allProgress = Object.values(progressStore.progressMap)
+  const completedCount = allProgress.filter(p => p.completed).length
+  const totalCases = cases.length
+
+  let totalEvidenceDiscovered = 0
+  let totalEvidencePossible = 0
+  let totalCluesDiscovered = 0
+  let totalCluesPossible = 0
+  let totalSanityLost = 0
+  let totalPlayTime = 0
+  let playCount = 0
+
+  allProgress.forEach(progress => {
+    const caseData = getCaseById(progress.caseId)
+    if (caseData) {
+      totalEvidenceDiscovered += progress.discoveredEvidence.length
+      let evidenceCount = 0
+      caseData.scenes.forEach(scene => {
+        evidenceCount += scene.evidence.length
+      })
+      totalEvidencePossible += evidenceCount
+      totalCluesDiscovered += progress.discoveredClues.length
+      totalCluesPossible += caseData.clues.length
+    }
+    totalSanityLost += progress.totalSanityLost
+    playCount += progress.playCount
+
+    if (progress.fastestTime) {
+      totalPlayTime += progress.fastestTime
+    }
+  })
+
+  const evidenceRate = totalEvidencePossible > 0 
+    ? Math.round((totalEvidenceDiscovered / totalEvidencePossible) * 100) 
+    : 0
+  const clueRate = totalCluesPossible > 0 
+    ? Math.round((totalCluesDiscovered / totalCluesPossible) * 100) 
+    : 0
+  const avgSanityPerCase = completedCount > 0 
+    ? Math.round(totalSanityLost / completedCount) 
+    : 0
+  const avgPlayTime = completedCount > 0 
+    ? Math.round(totalPlayTime / completedCount) 
+    : 0
+
+  const tags = []
+  if (evidenceRate >= 80) tags.push({ name: '证据猎手', icon: '🔎', color: '#4a90d9' })
+  if (clueRate >= 70) tags.push({ name: '线索大师', icon: '🧩', color: '#6b4c9a' })
+  if (battleStats.value.successRate >= 80) tags.push({ name: '常胜侦探', icon: '🏆', color: '#ffd700' })
+  if (avgSanityPerCase <= 10) tags.push({ name: '钢铁意志', icon: '🧠', color: '#3a8b5a' })
+  if (battleStats.value.totalBranches >= 3) tags.push({ name: '探索者', icon: '🌟', color: '#8b3a8b' })
+  if (battleStats.value.bestGrade === 'S') tags.push({ name: 'S级调查员', icon: '⭐', color: '#ffd700' })
+  if (tags.length === 0) tags.push({ name: '初出茅庐', icon: '🌱', color: '#8b8b8b' })
+
+  return {
+    completionRate: totalCases > 0 ? Math.round((completedCount / totalCases) * 100) : 0,
+    completedCount,
+    totalCases,
+    evidenceRate,
+    clueRate,
+    avgSanityPerCase,
+    avgPlayTime,
+    playCount,
+    tags
+  }
+})
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}分${secs}秒`
+}
 
 const features = [
   {
@@ -202,6 +380,159 @@ function goToCommissionHall() {
         <div class="current-case-title">{{ currentCaseInfo.title }}</div>
         <div class="current-case-status">{{ currentCaseInfo.status === 'in_progress' ? '⏳ 调查中' : '🔄 重新调查' }}</div>
         <div class="current-case-action">点击继续 →</div>
+      </div>
+    </div>
+
+    <div v-if="activeProfile" class="profile-growth-section">
+      <h2 class="section-title">调查员成长档案</h2>
+      
+      <div class="growth-grid">
+        <div class="growth-card card battle-stats-card">
+          <div class="growth-card-header">
+            <span class="growth-card-icon">⚔️</span>
+            <h3 class="growth-card-title">历史战绩</h3>
+          </div>
+          <div class="battle-stats-grid">
+            <div class="battle-stat-item">
+              <span class="battle-stat-value success">{{ battleStats.completed }}</span>
+              <span class="battle-stat-label">已完成</span>
+            </div>
+            <div class="battle-stat-item">
+              <span class="battle-stat-value danger">{{ battleStats.failed }}</span>
+              <span class="battle-stat-label">失败</span>
+            </div>
+            <div class="battle-stat-item">
+              <span class="battle-stat-value warning">{{ battleStats.abandoned }}</span>
+              <span class="battle-stat-label">搁置</span>
+            </div>
+            <div class="battle-stat-item">
+              <span class="battle-stat-value accent">{{ battleStats.successRate }}%</span>
+              <span class="battle-stat-label">成功率</span>
+            </div>
+          </div>
+          <div class="battle-stats-detail">
+            <div class="detail-row">
+              <span class="detail-label">最佳评级</span>
+              <span class="detail-value grade">{{ battleStats.bestGrade }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">平均得分</span>
+              <span class="detail-value">{{ battleStats.avgScore }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">最快通关</span>
+              <span class="detail-value">{{ battleStats.fastestTime ? formatTime(battleStats.fastestTime) : '-' }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">解锁分支</span>
+              <span class="detail-value">{{ battleStats.totalBranches }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="growth-card card conclusion-prefs-card">
+          <div class="growth-card-header">
+            <span class="growth-card-icon">🎯</span>
+            <h3 class="growth-card-title">结论偏好</h3>
+          </div>
+          <div v-if="conclusionPreferences.totalEndings > 0" class="conclusion-prefs-content">
+            <div v-if="conclusionPreferences.dominantStyle" class="dominant-style">
+              <span class="dominant-icon">{{ conclusionPreferences.dominantStyle.icon }}</span>
+              <div class="dominant-info">
+                <span class="dominant-label">主导风格</span>
+                <span class="dominant-name">{{ conclusionPreferences.dominantStyle.name }}</span>
+              </div>
+            </div>
+            <div class="prefs-list">
+              <div 
+                v-for="pref in conclusionPreferences.preferences" 
+                :key="pref.type" 
+                class="pref-item"
+              >
+                <div class="pref-header">
+                  <span class="pref-icon">{{ pref.icon }}</span>
+                  <span class="pref-name">{{ pref.name }}</span>
+                  <span class="pref-count">{{ pref.count }}次</span>
+                </div>
+                <div class="pref-bar">
+                  <div 
+                    class="pref-bar-fill" 
+                    :style="{ width: pref.percentage + '%' }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="no-data">
+            <span class="no-data-icon">📊</span>
+            <p>完成案件后显示结论偏好分析</p>
+          </div>
+        </div>
+
+        <div class="growth-card card completion-profile-card">
+          <div class="growth-card-header">
+            <span class="growth-card-icon">🖼️</span>
+            <h3 class="growth-card-title">案件画像</h3>
+          </div>
+          <div class="profile-tags">
+            <span 
+              v-for="tag in caseCompletionProfile.tags" 
+              :key="tag.name" 
+              class="profile-tag"
+              :style="{ borderColor: tag.color, color: tag.color }"
+            >
+              {{ tag.icon }} {{ tag.name }}
+            </span>
+          </div>
+          <div class="profile-stats">
+            <div class="profile-stat-item">
+              <div class="profile-stat-header">
+                <span class="profile-stat-label">案件完成率</span>
+                <span class="profile-stat-value">{{ caseCompletionProfile.completionRate }}%</span>
+              </div>
+              <div class="profile-stat-bar">
+                <div 
+                  class="profile-stat-fill completion" 
+                  :style="{ width: caseCompletionProfile.completionRate + '%' }"
+                ></div>
+              </div>
+            </div>
+            <div class="profile-stat-item">
+              <div class="profile-stat-header">
+                <span class="profile-stat-label">证据发现率</span>
+                <span class="profile-stat-value">{{ caseCompletionProfile.evidenceRate }}%</span>
+              </div>
+              <div class="profile-stat-bar">
+                <div 
+                  class="profile-stat-fill evidence" 
+                  :style="{ width: caseCompletionProfile.evidenceRate + '%' }"
+                ></div>
+              </div>
+            </div>
+            <div class="profile-stat-item">
+              <div class="profile-stat-header">
+                <span class="profile-stat-label">线索发现率</span>
+                <span class="profile-stat-value">{{ caseCompletionProfile.clueRate }}%</span>
+              </div>
+              <div class="profile-stat-bar">
+                <div 
+                  class="profile-stat-fill clue" 
+                  :style="{ width: caseCompletionProfile.clueRate + '%' }"
+                ></div>
+              </div>
+            </div>
+          </div>
+          <div class="profile-meta">
+            <div class="meta-item">
+              <span class="meta-label">总游玩次数</span>
+              <span class="meta-value">{{ caseCompletionProfile.playCount }}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">平均失智</span>
+              <span class="meta-value danger">{{ caseCompletionProfile.avgSanityPerCase }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -664,6 +995,327 @@ function goToCommissionHall() {
   font-style: normal;
 }
 
+.profile-growth-section {
+  padding: 4rem 2rem;
+  background: rgba(107, 76, 154, 0.08);
+}
+
+.growth-grid {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.growth-card {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.growth-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.growth-card-icon {
+  font-size: 1.75rem;
+}
+
+.growth-card-title {
+  font-size: 1.25rem;
+  color: var(--color-accent-light);
+  margin: 0;
+}
+
+.battle-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.battle-stat-item {
+  text-align: center;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.battle-stat-value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.battle-stat-value.success {
+  color: #3a8b5a;
+}
+
+.battle-stat-value.danger {
+  color: #8b3a3a;
+}
+
+.battle-stat-value.warning {
+  color: #8b6b3a;
+}
+
+.battle-stat-value.accent {
+  color: var(--color-accent-light);
+}
+
+.battle-stat-label {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.battle-stats-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+.detail-label {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.detail-value {
+  font-weight: bold;
+  color: var(--color-text);
+}
+
+.detail-value.grade {
+  font-size: 1.25rem;
+  color: #ffd700;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+
+.conclusion-prefs-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dominant-style {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: rgba(107, 76, 154, 0.2);
+  border-radius: 8px;
+  border: 1px solid var(--color-accent);
+}
+
+.dominant-icon {
+  font-size: 2.5rem;
+}
+
+.dominant-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.dominant-label {
+  font-size: 0.75rem;
+  color: var(--color-accent-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.dominant-name {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--color-text);
+}
+
+.prefs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pref-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pref-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pref-icon {
+  font-size: 1rem;
+}
+
+.pref-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.pref-count {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.pref-bar {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pref-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light));
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.no-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.no-data-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.5;
+}
+
+.no-data p {
+  color: var(--color-text-dim);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.profile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.profile-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.profile-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.profile-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.profile-stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-stat-label {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+}
+
+.profile-stat-value {
+  font-weight: bold;
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.profile-stat-bar {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.profile-stat-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.profile-stat-fill.completion {
+  background: linear-gradient(90deg, #3a8b5a, #5aab7a);
+}
+
+.profile-stat-fill.evidence {
+  background: linear-gradient(90deg, #4a90d9, #6ab0f9);
+}
+
+.profile-stat-fill.clue {
+  background: linear-gradient(90deg, #6b4c9a, #8b6cba);
+}
+
+.profile-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.meta-item {
+  text-align: center;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+}
+
+.meta-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  margin-bottom: 0.25rem;
+}
+
+.meta-value {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: var(--color-text);
+}
+
+.meta-value.danger {
+  color: #8b3a3a;
+}
+
 @media (max-width: 768px) {
   .hero-title {
     font-size: 2rem;
@@ -675,6 +1327,10 @@ function goToCommissionHall() {
   
   .section-title {
     font-size: 1.5rem;
+  }
+
+  .growth-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
