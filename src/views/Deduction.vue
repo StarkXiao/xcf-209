@@ -875,7 +875,7 @@ function disproveOption(optionId: string) {
             </div>
             <div class="stat-item">
               <span class="stat-label">调查时长</span>
-              <span class="stat-value">{{ saveStore.getPlayDuration(gameStore.gameState.startTime) }}</span>
+              <span class="stat-value">{{ saveStore.formatPlayDuration(gameStore.gameState.startTime) }}</span>
             </div>
             <div class="stat-item">
               <span class="stat-label">推演分支</span>

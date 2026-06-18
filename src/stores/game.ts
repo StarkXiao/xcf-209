@@ -339,6 +339,10 @@ export const useGameStore = defineStore('game', () => {
     getInventoryStore().checkAndUnlockRecipes()
 
     setCaseStatus(caseId, 'in_progress')
+
+    const saveStore = useSaveStore()
+    saveStore.startAutoSaveTimer()
+
     return true
   }
 
@@ -499,6 +503,25 @@ export const useGameStore = defineStore('game', () => {
 
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnSanityChange(gameState.value.sanity)
+
+    if (amount < 0) {
+      const sanityPercent = (gameState.value.sanity / effectiveMaxSanity.value) * 100
+      const thresholds = [80, 60, 40, 20, 10]
+      for (const threshold of thresholds) {
+        const prevPercent = ((gameState.value.sanity - finalAmount) / effectiveMaxSanity.value) * 100
+        if (prevPercent > threshold && sanityPercent <= threshold) {
+          const saveStore = useSaveStore()
+          saveStore.createKeySnapshot(
+            'sanity_threshold',
+            `理智值降至 ${threshold}% 以下：${reason}`,
+            {
+              significance: threshold <= 20 ? 'critical' : threshold <= 40 ? 'major' : 'moderate'
+            }
+          )
+          break
+        }
+      }
+    }
 
     if (gameState.value.sanity <= 0) {
       triggerCaseFailure()
@@ -708,11 +731,17 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const caseData = currentCase.value
+    let isSpecial = false
+    let evidenceName = evidenceId
     if (caseData) {
       for (const scene of caseData.scenes) {
         const evidence = scene.evidence.find(e => e.id === evidenceId)
-        if (evidence && evidence.materialDrops && evidence.materialDrops.length > 0) {
-          getInventoryStore().dropMaterialsFromEvidence(evidenceId, evidence.materialDrops)
+        if (evidence) {
+          evidenceName = evidence.name
+          isSpecial = !!evidence.isSpecial
+          if (evidence.materialDrops && evidence.materialDrops.length > 0) {
+            getInventoryStore().dropMaterialsFromEvidence(evidenceId, evidence.materialDrops)
+          }
         }
       }
     }
@@ -726,6 +755,18 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('evidence_discovered', evidenceId)
     updateDeductionCompleteness()
+
+    if (isSpecial || gameState.value.discoveredEvidence.length % 3 === 0) {
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'evidence_discovered',
+        isSpecial ? `发现关键证据：${evidenceName}` : `发现证据：${evidenceName}`,
+        {
+          relatedIds: [evidenceId],
+          significance: isSpecial ? 'major' : 'minor'
+        }
+      )
+    }
 
     return true
   }
@@ -856,6 +897,18 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('clue_analyzed', clueId)
     updateDeductionCompleteness()
+
+    if (gameState.value.analyzedClues.length % 2 === 0 || bonusCluesDiscovered.length > 0 || autoConnections.length > 0) {
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'clue_analyzed',
+        `分析线索：${clueId}`,
+        {
+          relatedIds: [clueId, ...bonusCluesDiscovered],
+          significance: (bonusCluesDiscovered.length > 0 || autoConnections.length > 0) ? 'moderate' : 'minor'
+        }
+      )
+    }
     
     return { 
       success: true, 
@@ -1012,6 +1065,18 @@ export const useGameStore = defineStore('game', () => {
     
     decrementRecoveryCooldown()
     checkAndTriggerSanityRecovery('scene_enter')
+
+    if (isFirstVisit) {
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'scene_entered',
+        `进入新场景：${sceneId}`,
+        {
+          sceneId,
+          significance: 'minor'
+        }
+      )
+    }
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -1480,6 +1545,17 @@ export const useGameStore = defineStore('game', () => {
     if (!gameState.value.deductionBranches.includes(branchId)) {
       gameState.value.deductionBranches.push(branchId)
       addLog('conclusion', `解锁推演分支：${branchId}`)
+
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'deduction_branch',
+        `解锁推演分支：${branchId}`,
+        {
+          relatedIds: [branchId],
+          significance: 'major',
+          customName: `[分支] ${branchId}`
+        }
+      )
     }
   }
 
@@ -1872,6 +1948,18 @@ export const useGameStore = defineStore('game', () => {
       unlockedEvidence
     })
 
+    if (mail.isImportant || unlockedClues.length > 0 || unlockedEvidence.length > 0) {
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'mail_read',
+        `阅读邮件：${mail.subject}`,
+        {
+          relatedIds: [mailId, ...unlockedClues, ...unlockedEvidence],
+          significance: mail.isImportant ? 'moderate' : 'minor'
+        }
+      )
+    }
+
     return { success: true, unlockedClues, unlockedEvidence }
   }
 
@@ -2018,6 +2106,18 @@ export const useGameStore = defineStore('game', () => {
       unlockedClues,
       unlockedPages
     })
+
+    if (doc.isClassified || unlockedClues.length > 0 || unlockedPages.length > 1) {
+      const saveStore = useSaveStore()
+      saveStore.createKeySnapshot(
+        'document_read',
+        `阅读文书：${doc.title}`,
+        {
+          relatedIds: [docId, ...unlockedClues],
+          significance: doc.isClassified ? 'major' : 'minor'
+        }
+      )
+    }
 
     return { success: true, unlockedClues, unlockedPages }
   }
@@ -2243,6 +2343,17 @@ export const useGameStore = defineStore('game', () => {
 
     checkMailDelivery('phase_started', phaseId)
     updateDeductionCompleteness()
+
+    const saveStore = useSaveStore()
+    saveStore.createKeySnapshot(
+      'phase_unlocked',
+      `进入新阶段：${phase.name}`,
+      {
+        phaseId,
+        significance: 'major',
+        customName: `[阶段] ${phase.name}`
+      }
+    )
   }
 
   function setActivePhase(phaseId: string) {

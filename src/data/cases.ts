@@ -2064,3 +2064,7 @@ export function reopenCase(caseId: string): boolean {
   caseData.status = 'reopened'
   return true
 }
+
+export function getAllCases(): Case[] {
+  return cases
+}

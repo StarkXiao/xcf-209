@@ -456,6 +456,70 @@ export interface SanityRecoveryEvent {
   maximumSanityThreshold?: number
 }
 
+export type SaveType = 'manual' | 'auto' | 'snapshot' | 'checkpoint'
+
+export type KeySnapshotTriggerType = 
+  | 'evidence_discovered' 
+  | 'clue_analyzed' 
+  | 'phase_unlocked' 
+  | 'deduction_branch' 
+  | 'scene_entered' 
+  | 'sanity_threshold' 
+  | 'mail_read' 
+  | 'document_read'
+  | 'tool_acquired'
+  | 'conclusion_reached'
+
+export interface KeySnapshotMetadata {
+  triggerType: KeySnapshotTriggerType
+  triggerDescription: string
+  relatedIds?: string[]
+  phaseId?: string
+  sceneId?: string
+  significance: 'minor' | 'moderate' | 'major' | 'critical'
+}
+
+export interface SaveCoverSummary {
+  caseTitle: string
+  caseDifficulty: string
+  progressPercentage: number
+  phaseName: string
+  currentSceneName: string
+  keyHighlights: string[]
+  moodTag: 'hopeful' | 'tense' | 'dangerous' | 'corrupted' | 'mysterious' | 'victorious'
+  sanityStatus: string
+  timeElapsed: string
+  discoveredCount: {
+    evidence: number
+    clues: number
+    connections: number
+  }
+  endingHint?: string
+}
+
+export interface CaseProgressMetric {
+  metricId: string
+  metricName: string
+  value: number
+  maxValue?: number
+  unit?: string
+  color?: string
+}
+
+export interface CrossCaseComparison {
+  caseIds: string[]
+  comparisonDate: number
+  metrics: {
+    [caseId: string]: CaseProgressMetric[]
+  }
+  overallRanking: {
+    caseId: string
+    score: number
+    rank: number
+  }[]
+  summaryNotes: string[]
+}
+
 export interface SaveData {
   id: string
   name: string
@@ -467,6 +531,15 @@ export interface SaveData {
   isNewGamePlus?: boolean
   inheritedTools?: string[]
   characterProfileId?: string
+  saveType: SaveType
+  snapshotMetadata?: KeySnapshotMetadata
+  coverSummary?: SaveCoverSummary
+  playTimeSeconds: number
+  autoSaveConfig?: {
+    intervalMinutes: number
+    enabled: boolean
+  }
+  tags?: string[]
 }
 
 export interface SanityEvent {
