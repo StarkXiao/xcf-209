@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, toRef } from 'vue'
 import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
 import { getCaseById, setCaseStatus, failCase as failCaseData, abandonCase as abandonCaseData } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
@@ -1258,16 +1258,16 @@ export const useGameStore = defineStore('game', () => {
     let baseChance = 0
     switch (context) {
       case 'scene_enter':
-        baseChance = sanityPercent < 40 ? 45 : sanityPercent < 60 ? 25 : 10
+        baseChance = sanityPercent < 40 ? 85 : sanityPercent < 70 ? 55 : 35
         break
       case 'after_search':
-        baseChance = sanityPercent < 40 ? 35 : sanityPercent < 60 ? 18 : 8
+        baseChance = sanityPercent < 40 ? 65 : sanityPercent < 70 ? 40 : 20
         break
       case 'low_sanity':
-        baseChance = 70
+        baseChance = 90
         break
       case 'random':
-        baseChance = sanityPercent < 50 ? 20 : 8
+        baseChance = sanityPercent < 50 ? 35 : 15
         break
     }
 
@@ -3076,7 +3076,7 @@ export const useGameStore = defineStore('game', () => {
     effectiveMaxSanity,
     shockPercentage,
     erosionPercentage,
-    activeSanityRecoveryEvent: computed(() => gameState.value.activeSanityRecoveryEvent),
+    activeSanityRecoveryEvent: toRef(gameState.value, 'activeSanityRecoveryEvent'),
     tempEvidencePenalty,
     tempAnomalyRiskBonus,
     tempClueAnalysisPenalty,

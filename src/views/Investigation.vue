@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, toRef } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
@@ -11,6 +11,8 @@ import CraftingPanel from '@/components/inventory/CraftingPanel.vue'
 import MailInbox from '@/components/mail/MailInbox.vue'
 import DocumentList from '@/components/documents/DocumentList.vue'
 import PhaseTimeline from '@/components/phases/PhaseTimeline.vue'
+import SanityRecoveryModal from '@/components/sanity/SanityRecoveryModal.vue'
+import StatusEffectsBar from '@/components/sanity/StatusEffectsBar.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -348,6 +350,16 @@ function getMilestoneDescription(msId: string): string {
   if (ms.effects.anomalyEventBonus) desc += `\n异常事件触发率 +${ms.effects.anomalyEventBonus}%`
   return desc
 }
+
+const activeRecoveryEvent = toRef(gameStore, 'activeSanityRecoveryEvent')
+
+function handleRecoveryOption(optionId: string) {
+  gameStore.resolveSanityRecoveryOption(optionId)
+}
+
+function handleSkipRecovery() {
+  gameStore.skipSanityRecoveryEvent()
+}
 </script>
 
 <template>
@@ -386,6 +398,7 @@ function getMilestoneDescription(msId: string): string {
       </div>
 
       <div v-show="activeTab === 'investigation'">
+      <StatusEffectsBar />
       <div class="investigation-header">
         <div class="case-info">
           <h1 class="case-title">{{ caseData.title }}</h1>
@@ -854,6 +867,15 @@ function getMilestoneDescription(msId: string): string {
             </div>
           </div>
         </div>
+      </transition>
+
+      <transition name="fade">
+        <SanityRecoveryModal 
+          v-if="activeRecoveryEvent"
+          :event="activeRecoveryEvent"
+          @select-option="handleRecoveryOption"
+          @skip="handleSkipRecovery"
+        />
       </transition>
 
       <transition name="fade">

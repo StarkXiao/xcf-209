@@ -6,7 +6,7 @@ export const sanityRecoveryEvents: SanityRecoveryEvent[] = [
     name: '安静的角落',
     description: '你注意到一个相对安静的地方，或许可以在这里稍作休整，恢复一些精神状态。',
     triggerContext: 'scene_enter',
-    maximumSanityThreshold: 70,
+    maximumSanityThreshold: 95,
     options: [
       {
         id: 'quick_rest',
@@ -44,7 +44,7 @@ export const sanityRecoveryEvents: SanityRecoveryEvent[] = [
     name: '泛黄的照片',
     description: '你发现了一张旧照片，照片中的人似乎在微笑。注视着它，你想起了一些美好的往事...',
     triggerContext: 'after_search',
-    maximumSanityThreshold: 65,
+    maximumSanityThreshold: 90,
     options: [
       {
         id: 'glance_photo',
@@ -80,7 +80,7 @@ export const sanityRecoveryEvents: SanityRecoveryEvent[] = [
     description: '一阵微风吹过，带来了远处模糊的低语声。这些声音似乎有某种韵律，也许可以利用它们来集中精神...',
     triggerContext: 'random',
     minimumSanityThreshold: 20,
-    maximumSanityThreshold: 60,
+    maximumSanityThreshold: 92,
     options: [
       {
         id: 'ignore_whispers',
@@ -157,7 +157,7 @@ export const sanityRecoveryEvents: SanityRecoveryEvent[] = [
     name: '神秘符文',
     description: '墙壁上刻着一个散发微光的古老符文，它似乎蕴含着某种平复精神的力量。',
     triggerContext: 'scene_enter',
-    maximumSanityThreshold: 75,
+    maximumSanityThreshold: 95,
     options: [
       {
         id: 'study_sigil',
@@ -195,7 +195,7 @@ export const sanityRecoveryEvents: SanityRecoveryEvent[] = [
     name: '孩童的笑声',
     description: '你似乎听到了远处传来孩童纯真的笑声，这声音让你想起了那些无忧无虑的日子...',
     triggerContext: 'random',
-    maximumSanityThreshold: 55,
+    maximumSanityThreshold: 85,
     options: [
       {
         id: 'chase_sound',
