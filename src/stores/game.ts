@@ -34,8 +34,22 @@ import {
   determineEndingAlignment,
   CORRUPTION_MILESTONES
 } from '@/data/spiritualPollution'
+import {
+  pickRandomSanityRecoveryEvent
+} from '@/data/sanityRecovery'
+import type { SanityRecoveryEvent } from '@/types'
 
 let timerInterval: ReturnType<typeof setInterval> | null = null
+
+interface TemporaryEffect {
+  remainingSearches?: number
+  remainingSeconds?: number
+  value: number
+}
+
+const tempEvidencePenalty = ref<TemporaryEffect | null>(null)
+const tempAnomalyRiskBonus = ref<TemporaryEffect | null>(null)
+const tempClueAnalysisPenalty = ref<TemporaryEffect | null>(null)
 
 const DEFAULT_SCORE_CONFIG: CaseScoreConfig = {
   evidenceWeight: 30,
@@ -125,7 +139,9 @@ export const useGameStore = defineStore('game', () => {
     clueComparisons: [],
     deductionHints: [],
     comparisonMode: false,
-    comparisonSelectedClues: []
+    comparisonSelectedClues: [],
+    activeSanityRecoveryEvent: null,
+    sanityRecoveryEventCooldown: 0
   })
 
   const currentCase = computed(() => {
@@ -283,8 +299,14 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: []
+      comparisonSelectedClues: [],
+      activeSanityRecoveryEvent: null,
+      sanityRecoveryEventCooldown: 0
     }
+
+    tempEvidencePenalty.value = null
+    tempAnomalyRiskBonus.value = null
+    tempClueAnalysisPenalty.value = null
 
     startTimer()
     startPhase('phase-1')
@@ -466,6 +488,11 @@ export const useGameStore = defineStore('game', () => {
 
     if (amount < 0) {
       checkAnomalyEvents()
+      
+      const sanityPercent = (gameState.value.sanity / effectiveMaxSanity.value) * 100
+      if (sanityPercent <= 30 && !gameState.value.activeSanityRecoveryEvent) {
+        checkAndTriggerSanityRecovery('low_sanity')
+      }
     }
     
     decayPollution()
@@ -529,8 +556,9 @@ export const useGameStore = defineStore('game', () => {
     const talentBonus = talentEffects.value.evidenceHitRateBonus
     const sanityPenalty = getSanityPenalty(gameState.value.sanity, gameState.value.maxSanity)
     const pollutionPenalty = milestoneEffects.value.hitRatePenalty
+    const tempPenalty = tempEvidencePenalty.value?.value || 0
 
-    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty
+    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty - tempPenalty
     finalRate = Math.max(5, Math.min(95, finalRate))
 
     const isGuaranteed = finalRate >= 95
@@ -540,7 +568,7 @@ export const useGameStore = defineStore('game', () => {
       baseRate,
       toolBonus: toolBonus + talentBonus,
       durabilityPenalty,
-      sanityPenalty: sanityPenalty + pollutionPenalty,
+      sanityPenalty: sanityPenalty + pollutionPenalty + tempPenalty,
       finalRate,
       isGuaranteed,
       isImpossible
@@ -649,6 +677,15 @@ export const useGameStore = defineStore('game', () => {
     }
     checkEvidenceRefresh('after_search', { evidenceId: evidence.id, success })
     
+    if (tempEvidencePenalty.value?.remainingSearches !== undefined) {
+      tempEvidencePenalty.value.remainingSearches--
+      if (tempEvidencePenalty.value.remainingSearches <= 0) {
+        tempEvidencePenalty.value = null
+      }
+    }
+    
+    checkAndTriggerSanityRecovery('after_search')
+    
     return result
   }
 
@@ -722,13 +759,23 @@ export const useGameStore = defineStore('game', () => {
     }
 
     const clueAnalysisCost = currentCase.value?.timeLimit?.clueAnalysisCost || 8
-    consumeTime(clueAnalysisCost, `分析线索：${clueId}`)
+    const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
+    const tempAnalysisPenalty = tempClueAnalysisPenalty.value?.value || 0
+    
+    let effectiveCost = clueAnalysisCost
+    if (analysisSpeedBonus > 0) {
+      effectiveCost = Math.max(2, Math.floor(clueAnalysisCost * (1 - analysisSpeedBonus / 200)))
+    }
+    if (tempAnalysisPenalty > 0) {
+      effectiveCost = Math.ceil(effectiveCost * (1 + tempAnalysisPenalty / 100))
+    }
+    
+    consumeTime(effectiveCost, `分析线索：${clueId}`)
     gameState.value.timerState.clueAnalysisCount++
 
-    const analysisSpeedBonus = talentEffects.value.clueAnalysisSpeed
     const activeProfile = characterStore.activeProfile
     const wisdomBonus = activeProfile ? (activeProfile.stats.wisdom - 50) * 0.3 : 0
-    const totalAnalysisBonus = analysisSpeedBonus + wisdomBonus
+    const totalAnalysisBonus = analysisSpeedBonus + wisdomBonus - tempAnalysisPenalty
     
     gameState.value.analyzedClues.push(clueId)
     
@@ -962,6 +1009,9 @@ export const useGameStore = defineStore('game', () => {
     
     checkEvidenceRefresh('after_scene_switch', { sceneId })
     checkMailDelivery('scene_visited', sceneId)
+    
+    decrementRecoveryCooldown()
+    checkAndTriggerSanityRecovery('scene_enter')
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -1048,7 +1098,8 @@ export const useGameStore = defineStore('game', () => {
       now
     )
     
-    const eventTriggerBonus = talentEffects.value.eventTriggerChance + milestoneEffects.value.anomalyEventBonus
+    const tempAnomalyBonus = tempAnomalyRiskBonus.value?.value || 0
+    const eventTriggerBonus = talentEffects.value.eventTriggerChance + milestoneEffects.value.anomalyEventBonus + tempAnomalyBonus
     
     for (const event of availableEvents) {
       if (checkAnomalyTrigger(event, gameState.value.sanity, gameState.value.maxSanity, eventTriggerBonus)) {
@@ -1193,6 +1244,114 @@ export const useGameStore = defineStore('game', () => {
     modifySanity(3, '证伪虚假推演')
     
     return true
+  }
+
+  function checkAndTriggerSanityRecovery(context: SanityRecoveryEvent['triggerContext']) {
+    if (gameState.value.activeSanityRecoveryEvent) return
+    if (gameState.value.sanityRecoveryEventCooldown > 0) return
+    if (!gameState.value.currentCase) return
+
+    const currentSanity = gameState.value.sanity
+    const maxSanity = effectiveMaxSanity.value
+    const sanityPercent = (currentSanity / maxSanity) * 100
+
+    let baseChance = 0
+    switch (context) {
+      case 'scene_enter':
+        baseChance = sanityPercent < 40 ? 45 : sanityPercent < 60 ? 25 : 10
+        break
+      case 'after_search':
+        baseChance = sanityPercent < 40 ? 35 : sanityPercent < 60 ? 18 : 8
+        break
+      case 'low_sanity':
+        baseChance = 70
+        break
+      case 'random':
+        baseChance = sanityPercent < 50 ? 20 : 8
+        break
+    }
+
+    const event = pickRandomSanityRecoveryEvent(context, currentSanity, maxSanity, baseChance)
+    if (event) {
+      gameState.value.activeSanityRecoveryEvent = event
+      addLog('discovery', `💭 出现精神恢复机会：${event.name}`)
+      addLog('discovery', event.description)
+    }
+  }
+
+  function resolveSanityRecoveryOption(optionId: string): boolean {
+    const event = gameState.value.activeSanityRecoveryEvent
+    if (!event) return false
+
+    const option = event.options.find(o => o.id === optionId)
+    if (!option) return false
+
+    addLog('discovery', `选择「${option.text}」`)
+    if (option.flavorText) {
+      addLog('discovery', option.flavorText)
+    }
+
+    if (option.sanityRecovery > 0) {
+      modifySanity(option.sanityRecovery, `恢复事件：${event.name} - ${option.text}`)
+    }
+
+    for (const cost of option.costs) {
+      switch (cost.type) {
+        case 'time':
+          consumeTime(cost.value, `恢复代价：${cost.description}`)
+          break
+        case 'evidence_penalty':
+          tempEvidencePenalty.value = {
+            value: cost.value,
+            remainingSearches: 3
+          }
+          addLog('penalty', `⚠️ ${cost.description}`)
+          break
+        case 'pollution_erosion':
+          addPollution(0, cost.value, 'sanity_recovery_cost', `恢复代价：${cost.description}`)
+          break
+        case 'tool_durability':
+          gameState.value.tools.forEach(tool => {
+            tool.durability = Math.max(0, tool.durability - cost.value)
+          })
+          addLog('penalty', `⚠️ ${cost.description}`)
+          break
+        case 'anomaly_risk':
+          tempAnomalyRiskBonus.value = {
+            value: cost.value,
+            remainingSeconds: 30
+          }
+          addLog('penalty', `⚠️ ${cost.description}`)
+          break
+        case 'clue_analysis_penalty':
+          tempClueAnalysisPenalty.value = {
+            value: cost.value,
+            remainingSeconds: 60
+          }
+          addLog('penalty', `⚠️ ${cost.description}`)
+          break
+      }
+    }
+
+    gameState.value.activeSanityRecoveryEvent = null
+    gameState.value.sanityRecoveryEventCooldown = 3
+
+    return true
+  }
+
+  function skipSanityRecoveryEvent() {
+    const event = gameState.value.activeSanityRecoveryEvent
+    if (!event) return
+    
+    addLog('discovery', `放弃了精神恢复机会：${event.name}`)
+    gameState.value.activeSanityRecoveryEvent = null
+    gameState.value.sanityRecoveryEventCooldown = 2
+  }
+
+  function decrementRecoveryCooldown() {
+    if (gameState.value.sanityRecoveryEventCooldown > 0) {
+      gameState.value.sanityRecoveryEventCooldown--
+    }
   }
 
   function isFakeClue(clueId: string): boolean {
@@ -1347,6 +1506,23 @@ export const useGameStore = defineStore('game', () => {
         if (gameState.value.timerState.remainingSeconds <= 0) {
           handleTimeExpired()
         }
+      }
+      
+      if (tempAnomalyRiskBonus.value?.remainingSeconds !== undefined) {
+        tempAnomalyRiskBonus.value.remainingSeconds--
+        if (tempAnomalyRiskBonus.value.remainingSeconds <= 0) {
+          tempAnomalyRiskBonus.value = null
+        }
+      }
+      if (tempClueAnalysisPenalty.value?.remainingSeconds !== undefined) {
+        tempClueAnalysisPenalty.value.remainingSeconds--
+        if (tempClueAnalysisPenalty.value.remainingSeconds <= 0) {
+          tempClueAnalysisPenalty.value = null
+        }
+      }
+      
+      if (Math.random() < 0.02) {
+        checkAndTriggerSanityRecovery('random')
       }
     }, 1000)
   }
@@ -2356,8 +2532,14 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: []
+      comparisonSelectedClues: [],
+      activeSanityRecoveryEvent: null,
+      sanityRecoveryEventCooldown: 0
     }
+    
+    tempEvidencePenalty.value = null
+    tempAnomalyRiskBonus.value = null
+    tempClueAnalysisPenalty.value = null
   }
 
   function generateAnalysisId(): string {
@@ -2894,6 +3076,10 @@ export const useGameStore = defineStore('game', () => {
     effectiveMaxSanity,
     shockPercentage,
     erosionPercentage,
+    activeSanityRecoveryEvent: computed(() => gameState.value.activeSanityRecoveryEvent),
+    tempEvidencePenalty,
+    tempAnomalyRiskBonus,
+    tempClueAnalysisPenalty,
     startCase,
     modifySanity,
     addPollution,
@@ -2980,6 +3166,8 @@ export const useGameStore = defineStore('game', () => {
     getDeductionHints,
     dismissDeductionHint,
     triggerCaseFailure,
-    abandonCurrentCase
+    abandonCurrentCase,
+    resolveSanityRecoveryOption,
+    skipSanityRecoveryEvent
   }
 })

@@ -420,6 +420,40 @@ export interface GameState {
   deductionHints: DeductionHint[]
   comparisonMode: boolean
   comparisonSelectedClues: string[]
+  activeSanityRecoveryEvent: SanityRecoveryEvent | null
+  sanityRecoveryEventCooldown: number
+}
+
+export type SanityRecoveryCostType = 
+  | 'time' 
+  | 'evidence_penalty' 
+  | 'pollution_erosion' 
+  | 'tool_durability' 
+  | 'anomaly_risk' 
+  | 'clue_analysis_penalty'
+
+export interface SanityRecoveryOptionCost {
+  type: SanityRecoveryCostType
+  value: number
+  description: string
+}
+
+export interface SanityRecoveryOption {
+  id: string
+  text: string
+  sanityRecovery: number
+  costs: SanityRecoveryOptionCost[]
+  flavorText?: string
+}
+
+export interface SanityRecoveryEvent {
+  id: string
+  name: string
+  description: string
+  triggerContext: 'scene_enter' | 'after_search' | 'low_sanity' | 'random'
+  options: SanityRecoveryOption[]
+  minimumSanityThreshold?: number
+  maximumSanityThreshold?: number
 }
 
 export interface SaveData {
@@ -981,6 +1015,7 @@ export type PollutionSource =
   | 'dark_knowledge'
   | 'save_ritual'
   | 'ending_choice'
+  | 'sanity_recovery_cost'
 
 export interface PollutionEvent {
   id: string
