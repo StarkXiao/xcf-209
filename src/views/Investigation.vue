@@ -242,6 +242,11 @@ const visibleEvidence = computed(() => {
   return currentScene.value.evidence.filter(e => gameStore.isEvidenceVisible(e))
 })
 
+const currentSceneSearchedCount = computed(() => {
+  if (!currentScene.value) return 0
+  return visibleEvidence.value.filter(e => !isEvidenceDiscovered(e.id) && getEvidenceSearchCount(e.id) > 0).length
+})
+
 const newlyUnlockedEvidence = ref<Set<string>>(new Set())
 
 function isNewlyUnlocked(evidenceId: string): boolean {
@@ -313,6 +318,17 @@ function isEvidenceDiscoverable(evidence: Evidence): boolean {
   return gameStore.canDiscoverEvidence(evidence)
 }
 
+function getEvidenceSearchCount(evidenceId: string): number {
+  return gameStore.getEvidenceSearchCount(evidenceId)
+}
+
+function getSearchCountLabel(count: number): string {
+  if (count <= 0) return ''
+  if (count >= 4) return `${count}×⚠`
+  if (count >= 2) return `${count}×`
+  return ''
+}
+
 function hoverEvidence(evidence: Evidence) {
   hoveredEvidence.value = evidence
 }
@@ -338,6 +354,9 @@ function clickEvidence(evidence: Evidence) {
   const result = gameStore.searchEvidence(evidence)
   
   searchResultMessage.value = result.message
+  if (result.searchCount && result.searchCount > 1 && result.hitRateDecay && result.hitRateDecay > 0) {
+    searchResultMessage.value += `（命中率 -${result.hitRateDecay}%，时间 +${result.timeCostDecay}s）`
+  }
   showSearchResult.value = true
   
   setTimeout(() => {
@@ -924,7 +943,9 @@ function getSparkleStyle(index: number) {
                     selected: selectedEvidence?.id === evidence.id,
                     special: evidence.isSpecial && !isEvidenceDiscovered(evidence.id),
                     undiscoverable: !isEvidenceDiscoverable(evidence) && !isEvidenceDiscovered(evidence.id),
-                    'newly-unlocked': isNewlyUnlocked(evidence.id)
+                    'newly-unlocked': isNewlyUnlocked(evidence.id),
+                    'repeat-searched': !isEvidenceDiscovered(evidence.id) && getEvidenceSearchCount(evidence.id) > 0,
+                    'heavy-decay': !isEvidenceDiscovered(evidence.id) && getEvidenceSearchCount(evidence.id) >= 3
                   }"
                   :style="getEvidencePosition(evidence)"
                   @click="clickEvidence(evidence)"
@@ -937,6 +958,11 @@ function getSparkleStyle(index: number) {
                     </span>
                     <span v-else class="marker-icon found">✓</span>
                   </div>
+                  <span
+                    v-if="!isEvidenceDiscovered(evidence.id) && getEvidenceSearchCount(evidence.id) > 0"
+                    class="search-count-badge"
+                    :class="{ 'badge-warn': getEvidenceSearchCount(evidence.id) >= 3 }"
+                  >{{ getSearchCountLabel(getEvidenceSearchCount(evidence.id)) }}</span>
                   <div class="marker-glow"></div>
                   
                   <transition name="fade">
@@ -946,6 +972,10 @@ function getSparkleStyle(index: number) {
                     >
                       <div class="tooltip-name">
                         {{ evidence.isSpecial ? '★ 特殊证据' : '未知证据' }}
+                      </div>
+                      <div v-if="getEvidenceSearchCount(evidence.id) > 0" class="tooltip-search-status">
+                        <span class="search-status-label">已搜查</span>
+                        <span class="search-status-count">{{ getEvidenceSearchCount(evidence.id) }} 次</span>
                       </div>
                       <div v-if="hoveredHitRate" class="tooltip-hitrate">
                         <span>成功率:</span>
@@ -970,6 +1000,15 @@ function getSparkleStyle(index: number) {
                         <div v-if="hoveredHitRate?.sanityPenalty" class="penalty">
                           理智惩罚: -{{ hoveredHitRate?.sanityPenalty }}%
                         </div>
+                        <div v-if="hoveredHitRate?.repeatSearchPenalty && hoveredHitRate.repeatSearchPenalty > 0" class="penalty decay-penalty">
+                          重复搜查衰减: -{{ hoveredHitRate.repeatSearchPenalty }}%
+                        </div>
+                      </div>
+                      <div v-if="getEvidenceSearchCount(evidence.id) >= 3" class="tooltip-decay-warning">
+                        ⚠ 此处已反复搜查，收益极低，建议探索其他位置
+                      </div>
+                      <div v-else-if="getEvidenceSearchCount(evidence.id) >= 2" class="tooltip-decay-hint">
+                        💡 重复搜查会降低成功率并增加时间消耗
                       </div>
                     </div>
                   </transition>
@@ -984,7 +1023,10 @@ function getSparkleStyle(index: number) {
 
               <div class="scene-hint">
                 <span class="hint-icon">🔍</span>
-                <span>点击标记搜查证据，选择合适的工具提高成功率</span>
+                <span v-if="currentSceneSearchedCount > 0">
+                  本场景已搜查 {{ currentSceneSearchedCount }} 处 · 重复搜查会降低成功率
+                </span>
+                <span v-else>点击标记搜查证据，选择合适的工具提高成功率</span>
               </div>
             </div>
           </div>
@@ -1966,6 +2008,48 @@ function getSparkleStyle(index: number) {
   border-color: #666;
 }
 
+.evidence-marker.repeat-searched .marker-content {
+  background: rgba(107, 76, 154, 0.55);
+  border-color: rgba(107, 76, 154, 0.7);
+}
+
+.evidence-marker.repeat-searched .marker-glow {
+  opacity: 0.15;
+  animation: none;
+}
+
+.evidence-marker.heavy-decay .marker-content {
+  background: rgba(80, 60, 100, 0.45);
+  border-color: rgba(80, 60, 100, 0.6);
+}
+
+.evidence-marker.heavy-decay .marker-glow {
+  opacity: 0.08;
+}
+
+.search-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: rgba(255, 152, 0, 0.9);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  line-height: 1;
+}
+
+.search-count-badge.badge-warn {
+  background: rgba(244, 67, 54, 0.9);
+}
+
 .evidence-marker.newly-unlocked .marker-content {
   animation: newlyUnlockedPulse 0.6s ease-out 5;
   border-color: var(--color-success);
@@ -2063,6 +2147,52 @@ function getSparkleStyle(index: number) {
 
 .tooltip-details .penalty {
   color: var(--color-danger);
+}
+
+.tooltip-details .decay-penalty {
+  color: #ff9800;
+  font-weight: bold;
+}
+
+.tooltip-search-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(255, 152, 0, 0.15);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.search-status-label {
+  font-size: 0.8rem;
+  color: #ff9800;
+}
+
+.search-status-count {
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: #ff9800;
+}
+
+.tooltip-decay-warning {
+  font-size: 0.75rem;
+  color: #f44336;
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background: rgba(244, 67, 54, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.tooltip-decay-hint {
+  font-size: 0.75rem;
+  color: #ff9800;
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255, 152, 0, 0.1);
+  border-radius: 4px;
 }
 
 .search-result-toast {

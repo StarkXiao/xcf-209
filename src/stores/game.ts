@@ -129,7 +129,8 @@ export const useGameStore = defineStore('game', () => {
     comparisonSelectedClues: [],
     wrongDeductionAttempts: 0,
     activeSanityRecoveryEvent: null,
-    sanityRecoveryEventCooldown: 0
+    sanityRecoveryEventCooldown: 0,
+    evidenceSearchCounts: {}
   })
 
   const tempEvidencePenalty = ref<TempStatusEffect | null>(null)
@@ -338,7 +339,8 @@ export const useGameStore = defineStore('game', () => {
       comparisonSelectedClues: [],
       wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
-      sanityRecoveryEventCooldown: 0
+      sanityRecoveryEventCooldown: 0,
+      evidenceSearchCounts: {}
     }
 
     tempEvidencePenalty.value = null
@@ -574,7 +576,10 @@ export const useGameStore = defineStore('game', () => {
     const sanityPenalty = getSanityPenalty(gameState.value.sanity, gameState.value.maxSanity)
     const pollutionPenalty = milestoneEffects.value.hitRatePenalty
 
-    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty
+    const searchCount = gameState.value.evidenceSearchCounts[evidence.id] || 0
+    const repeatSearchPenalty = searchCount > 0 ? Math.min(searchCount * 10, 40) : 0
+
+    let finalRate = baseRate + toolBonus + talentBonus - durabilityPenalty - sanityPenalty - pollutionPenalty - repeatSearchPenalty
     finalRate = Math.max(5, Math.min(95, finalRate))
 
     const isGuaranteed = finalRate >= 95
@@ -585,6 +590,7 @@ export const useGameStore = defineStore('game', () => {
       toolBonus: toolBonus + talentBonus,
       durabilityPenalty,
       sanityPenalty: sanityPenalty + pollutionPenalty,
+      repeatSearchPenalty,
       finalRate,
       isGuaranteed,
       isImpossible
@@ -598,7 +604,10 @@ export const useGameStore = defineStore('game', () => {
         evidenceId: evidence.id,
         hitRate: 100,
         durabilityLost: 0,
-        message: '该证据已经被发现了'
+        message: '该证据已经被发现了',
+        searchCount: 0,
+        hitRateDecay: 0,
+        timeCostDecay: 0
       }
     }
 
@@ -608,7 +617,10 @@ export const useGameStore = defineStore('game', () => {
         evidenceId: evidence.id,
         hitRate: 0,
         durabilityLost: 0,
-        message: '需要特定工具才能发现这个证据'
+        message: '需要特定工具才能发现这个证据',
+        searchCount: 0,
+        hitRateDecay: 0,
+        timeCostDecay: 0
       }
     }
 
@@ -618,18 +630,29 @@ export const useGameStore = defineStore('game', () => {
         evidenceId: evidence.id,
         hitRate: 0,
         durabilityLost: 0,
-        message: '⏰ 搜证时间已到，无法继续搜查'
+        message: '⏰ 搜证时间已到，无法继续搜查',
+        searchCount: 0,
+        hitRateDecay: 0,
+        timeCostDecay: 0
       }
     }
+
+    const previousSearchCount = gameState.value.evidenceSearchCounts[evidence.id] || 0
+    gameState.value.evidenceSearchCounts[evidence.id] = previousSearchCount + 1
+    const currentSearchCount = previousSearchCount + 1
 
     const hitRateResult = calculateHitRate(evidence)
     const selectedToolData = selectedTool.value
     let durabilityLost = 0
-    const searchAttemptCost = currentCase.value?.timeLimit?.searchAttemptCost || 5
-    const failedSearchPenalty = currentCase.value?.timeLimit?.failedSearchPenalty || 15
+    const baseSearchAttemptCost = currentCase.value?.timeLimit?.searchAttemptCost || 5
+    const baseFailedSearchPenalty = currentCase.value?.timeLimit?.failedSearchPenalty || 15
+
+    const timeCostDecay = previousSearchCount > 0 ? Math.min(previousSearchCount * 2, 10) : 0
+    const effectiveSearchCost = baseSearchAttemptCost + timeCostDecay
+    const effectiveFailedPenalty = baseFailedSearchPenalty + timeCostDecay
 
     gameState.value.timerState.searchAttemptCount++
-    consumeTime(searchAttemptCost, `搜查证据：${evidence.name}`)
+    consumeTime(effectiveSearchCost, `搜查证据：${evidence.name}${timeCostDecay > 0 ? `（重复搜查 +${timeCostDecay}s）` : ''}`)
 
     if (selectedToolData && selectedToolData.uses > 0 && selectedToolData.durability > 0) {
       const baseDurabilityLoss = Math.floor(Math.random() * 5) + 3
@@ -658,7 +681,7 @@ export const useGameStore = defineStore('game', () => {
         addTimeBonus(bonusTime, `发现特殊证据：${evidence.name}`)
       }
 
-      addLog('tool_use', `使用 ${selectedToolData?.name || '徒手搜查'} 成功发现 ${evidence.name}`)
+      addLog('tool_use', `使用 ${selectedToolData?.name || '徒手搜查'} 成功发现 ${evidence.name}${currentSearchCount > 1 ? `（第 ${currentSearchCount} 次搜查）` : ''}`)
 
       result = {
         success: true,
@@ -666,7 +689,10 @@ export const useGameStore = defineStore('game', () => {
         hitRate: hitRateResult.finalRate,
         toolUsed: selectedToolData?.id,
         durabilityLost,
-        message: `成功发现：${evidence.name}`
+        message: `成功发现：${evidence.name}`,
+        searchCount: currentSearchCount,
+        hitRateDecay: hitRateResult.repeatSearchPenalty,
+        timeCostDecay
       }
     } else {
       if (!gameState.value.failedSearches.includes(evidence.id)) {
@@ -674,9 +700,18 @@ export const useGameStore = defineStore('game', () => {
       }
       
       gameState.value.timerState.failedSearchCount++
-      consumeTime(failedSearchPenalty, `搜查失败惩罚：${evidence.name}`)
-      addLog('penalty', `搜查 ${evidence.name} 失败，额外消耗 ${failedSearchPenalty} 秒`)
-      addLog('tool_use', `搜查 ${evidence.name} 失败（成功率 ${hitRateResult.finalRate}%）`)
+      consumeTime(effectiveFailedPenalty, `搜查失败惩罚：${evidence.name}${timeCostDecay > 0 ? `（重复搜查 +${timeCostDecay}s）` : ''}`)
+      addLog('penalty', `搜查 ${evidence.name} 失败，额外消耗 ${effectiveFailedPenalty} 秒`)
+      addLog('tool_use', `搜查 ${evidence.name} 失败（成功率 ${hitRateResult.finalRate}%，第 ${currentSearchCount} 次搜查）`)
+
+      let failMessage = '搜查失败，再试一次吧...'
+      if (currentSearchCount >= 4) {
+        failMessage = '已反复搜查多次，此处收益极低，建议换一个方向...'
+      } else if (currentSearchCount >= 3) {
+        failMessage = '多次搜查无果，成功率已大幅降低...'
+      } else if (currentSearchCount >= 2) {
+        failMessage = '搜查失败，重复搜查此处的成功率正在下降...'
+      }
 
       result = {
         success: false,
@@ -684,7 +719,10 @@ export const useGameStore = defineStore('game', () => {
         hitRate: hitRateResult.finalRate,
         toolUsed: selectedToolData?.id,
         durabilityLost,
-        message: '搜查失败，再试一次吧...'
+        message: failMessage,
+        searchCount: currentSearchCount,
+        hitRateDecay: hitRateResult.repeatSearchPenalty,
+        timeCostDecay
       }
     }
     
@@ -694,6 +732,10 @@ export const useGameStore = defineStore('game', () => {
     checkEvidenceRefresh('after_search', { evidenceId: evidence.id, success })
     
     return result
+  }
+
+  function getEvidenceSearchCount(evidenceId: string): number {
+    return gameState.value.evidenceSearchCounts[evidenceId] || 0
   }
 
   function canDiscoverEvidence(evidence: Evidence): boolean {
@@ -1354,7 +1396,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function loadGameState(state: GameState) {
-    gameState.value = { ...state }
+    gameState.value = { ...state, evidenceSearchCounts: state.evidenceSearchCounts || {} }
     
     if (state.characterProfileId) {
       characterStore.setActiveProfile(state.characterProfileId)
@@ -2573,7 +2615,8 @@ export const useGameStore = defineStore('game', () => {
       comparisonSelectedClues: [],
       wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
-      sanityRecoveryEventCooldown: 0
+      sanityRecoveryEventCooldown: 0,
+      evidenceSearchCounts: {}
     }
 
     tempEvidencePenalty.value = null
@@ -3252,6 +3295,7 @@ export const useGameStore = defineStore('game', () => {
     getEndingDescriptor,
     calculateHitRate,
     searchEvidence,
+    getEvidenceSearchCount,
     canDiscoverEvidence,
     discoverEvidence,
     discoverClue,

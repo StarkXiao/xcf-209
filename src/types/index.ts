@@ -304,6 +304,7 @@ export interface HitRateResult {
   toolBonus: number
   durabilityPenalty: number
   sanityPenalty: number
+  repeatSearchPenalty: number
   finalRate: number
   isGuaranteed: boolean
   isImpossible: boolean
@@ -316,6 +317,9 @@ export interface SearchResult {
   toolUsed?: string
   durabilityLost: number
   message: string
+  searchCount?: number
+  hitRateDecay?: number
+  timeCostDecay?: number
 }
 
 export interface MaterialDrop {
@@ -481,6 +485,9 @@ export interface GameState {
   comparisonMode: boolean
   comparisonSelectedClues: string[]
   wrongDeductionAttempts: number
+  activeSanityRecoveryEvent: null
+  sanityRecoveryEventCooldown: number
+  evidenceSearchCounts: Record<string, number>
 }
 
 export type SaveType = 'manual' | 'auto' | 'snapshot' | 'checkpoint'
