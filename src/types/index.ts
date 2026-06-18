@@ -485,7 +485,7 @@ export interface GameState {
   comparisonMode: boolean
   comparisonSelectedClues: string[]
   wrongDeductionAttempts: number
-  activeSanityRecoveryEvent: null
+  activeSanityRecoveryEvent: SanityRecoveryEvent | null
   sanityRecoveryEventCooldown: number
   evidenceSearchCounts: Record<string, number>
 }
@@ -1694,11 +1694,4 @@ export interface LogFilterState {
 export interface LogNavigationState {
   focusedLogId: string | null
   currentIndex: number
-}
-
-declare module './index' {
-  interface GameState {
-    activeSanityRecoveryEvent: SanityRecoveryEvent | null
-    sanityRecoveryEventCooldown: number
-  }
 }
