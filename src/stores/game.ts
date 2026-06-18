@@ -1518,15 +1518,163 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function addLog(type: GameLogEntry['type'], description: string, details?: Record<string, unknown>) {
+    const phaseId = gameState.value.intelligenceState.currentPhaseId
     const entry: GameLogEntry = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
       type,
       description,
-      details
+      details: { ...details, phaseId: phaseId || undefined }
     }
     gameState.value.gameLog.push(entry)
     gameState.value.lastSaveTime = Date.now()
+  }
+
+  const logFilter = ref<{
+    types: GameLogEntry['type'][]
+    phaseIds: string[]
+    timeRange: { start: number | null; end: number | null }
+    searchQuery: string
+  }>({
+    types: [],
+    phaseIds: [],
+    timeRange: { start: null, end: null },
+    searchQuery: ''
+  })
+
+  const logNavigation = ref<{
+    currentIndex: number
+    focusedLogId: string | null
+  }>({
+    currentIndex: -1,
+    focusedLogId: null
+  })
+
+  const filteredGameLog = computed(() => {
+    let logs = gameState.value.gameLog
+
+    if (logFilter.value.types.length > 0) {
+      logs = logs.filter(l => logFilter.value.types.includes(l.type))
+    }
+
+    if (logFilter.value.phaseIds.length > 0) {
+      logs = logs.filter(l => {
+        const entryPhaseId = l.details?.phaseId as string | undefined
+        if (!entryPhaseId) return logFilter.value.phaseIds.includes('__no_phase__')
+        return logFilter.value.phaseIds.includes(entryPhaseId)
+      })
+    }
+
+    if (logFilter.value.timeRange.start !== null) {
+      logs = logs.filter(l => l.timestamp >= logFilter.value.timeRange.start!)
+    }
+    if (logFilter.value.timeRange.end !== null) {
+      logs = logs.filter(l => l.timestamp <= logFilter.value.timeRange.end!)
+    }
+
+    if (logFilter.value.searchQuery.trim()) {
+      const q = logFilter.value.searchQuery.toLowerCase()
+      logs = logs.filter(l => l.description.toLowerCase().includes(q))
+    }
+
+    return logs
+  })
+
+  const filteredLogStats = computed(() => {
+    const logs = gameState.value.gameLog
+    const typeCounts: Record<string, number> = {}
+    const phaseCounts: Record<string, number> = {}
+    logs.forEach(l => {
+      typeCounts[l.type] = (typeCounts[l.type] || 0) + 1
+      const pId = (l.details?.phaseId as string) || '__no_phase__'
+      phaseCounts[pId] = (phaseCounts[pId] || 0) + 1
+    })
+    return { typeCounts, phaseCounts }
+  })
+
+  const phaseOptions = computed(() => {
+    const phases = allPhases.value || []
+    return phases.map(p => ({ id: p.id, name: p.name, number: p.phaseNumber }))
+  })
+
+  function setLogFilterType(type: GameLogEntry['type']) {
+    const idx = logFilter.value.types.indexOf(type)
+    if (idx >= 0) {
+      logFilter.value.types.splice(idx, 1)
+    } else {
+      logFilter.value.types.push(type)
+    }
+  }
+
+  function setLogFilterPhase(phaseId: string) {
+    const idx = logFilter.value.phaseIds.indexOf(phaseId)
+    if (idx >= 0) {
+      logFilter.value.phaseIds.splice(idx, 1)
+    } else {
+      logFilter.value.phaseIds.push(phaseId)
+    }
+  }
+
+  function setLogFilterTimeRange(start: number | null, end: number | null) {
+    logFilter.value.timeRange.start = start
+    logFilter.value.timeRange.end = end
+  }
+
+  function setLogSearchQuery(query: string) {
+    logFilter.value.searchQuery = query
+  }
+
+  function clearLogFilter() {
+    logFilter.value = {
+      types: [],
+      phaseIds: [],
+      timeRange: { start: null, end: null },
+      searchQuery: ''
+    }
+    logNavigation.value = { currentIndex: -1, focusedLogId: null }
+  }
+
+  function navigateToLog(logId: string) {
+    const idx = filteredGameLog.value.findIndex(l => l.id === logId)
+    if (idx >= 0) {
+      logNavigation.value.currentIndex = idx
+      logNavigation.value.focusedLogId = logId
+    }
+  }
+
+  function navigateLogPrev() {
+    if (filteredGameLog.value.length === 0) return
+    const newIdx = Math.max(0, logNavigation.value.currentIndex - 1)
+    logNavigation.value.currentIndex = newIdx
+    logNavigation.value.focusedLogId = filteredGameLog.value[newIdx]?.id || null
+  }
+
+  function navigateLogNext() {
+    if (filteredGameLog.value.length === 0) return
+    const newIdx = Math.min(filteredGameLog.value.length - 1, logNavigation.value.currentIndex + 1)
+    logNavigation.value.currentIndex = newIdx
+    logNavigation.value.focusedLogId = filteredGameLog.value[newIdx]?.id || null
+  }
+
+  function navigateLogFirst() {
+    if (filteredGameLog.value.length === 0) return
+    logNavigation.value.currentIndex = 0
+    logNavigation.value.focusedLogId = filteredGameLog.value[0]?.id || null
+  }
+
+  function navigateLogLast() {
+    if (filteredGameLog.value.length === 0) return
+    const lastIdx = filteredGameLog.value.length - 1
+    logNavigation.value.currentIndex = lastIdx
+    logNavigation.value.focusedLogId = filteredGameLog.value[lastIdx]?.id || null
+  }
+
+  function jumpToLogByTime(timestamp: number) {
+    const idx = filteredGameLog.value.findIndex(l => l.timestamp >= timestamp)
+    if (idx >= 0) {
+      logNavigation.value.currentIndex = idx
+      logNavigation.value.focusedLogId = filteredGameLog.value[idx]?.id || null
+    }
   }
 
   function getGameState(): GameState {
@@ -3279,6 +3427,22 @@ export const useGameStore = defineStore('game', () => {
     triggerCaseFailure,
     abandonCurrentCase,
     resolveSanityRecoveryOption,
-    skipSanityRecoveryEvent
+    skipSanityRecoveryEvent,
+    logFilter,
+    logNavigation,
+    filteredGameLog,
+    filteredLogStats,
+    phaseOptions,
+    setLogFilterType,
+    setLogFilterPhase,
+    setLogFilterTimeRange,
+    setLogSearchQuery,
+    clearLogFilter,
+    navigateToLog,
+    navigateLogPrev,
+    navigateLogNext,
+    navigateLogFirst,
+    navigateLogLast,
+    jumpToLogByTime
   }
 })

@@ -28,6 +28,65 @@ const hoveredEvidence = ref<Evidence | null>(null)
 const searchResultMessage = ref('')
 const showSearchResult = ref(false)
 const showGameLog = ref(false)
+const logSearchInput = ref('')
+const logTimeStartInput = ref('')
+const logTimeEndInput = ref('')
+
+const LOG_TYPE_OPTIONS: { type: string; label: string }[] = [
+  { type: 'discovery', label: '🔍 发现' },
+  { type: 'analysis', label: '🧠 分析' },
+  { type: 'analysis_start', label: '🧠 开始分析' },
+  { type: 'analysis_complete', label: '🧠 完成分析' },
+  { type: 'connection', label: '🔗 关联' },
+  { type: 'sanity_loss', label: '💔 理智' },
+  { type: 'conclusion', label: '📝 结论' },
+  { type: 'tool_use', label: '🔧 工具使用' },
+  { type: 'tool_repair', label: '🛠️ 修复' },
+  { type: 'tool_break', label: '⚠️ 损坏' },
+  { type: 'timer', label: '⏱️ 时间' },
+  { type: 'scene_switch', label: '🚪 场景' },
+  { type: 'timeout', label: '⏰ 超时' },
+  { type: 'penalty', label: '❌ 惩罚' },
+  { type: 'bonus', label: '🎁 奖励' },
+  { type: 'evidence_refresh', label: '🔄 刷新' },
+  { type: 'material_drop', label: '💎 材料' },
+  { type: 'crafting', label: '🔨 制作' },
+  { type: 'recipe_unlock', label: '📖 配方' }
+]
+
+const isLogTypeFiltered = (type: string) => gameStore.logFilter.types.includes(type as any)
+const isPhaseFiltered = (phaseId: string) => gameStore.logFilter.phaseIds.includes(phaseId)
+
+function toggleLogTypeFilter(type: string) {
+  gameStore.setLogFilterType(type as any)
+}
+
+function togglePhaseFilter(phaseId: string) {
+  gameStore.setLogFilterPhase(phaseId)
+}
+
+function applyLogTimeFilter() {
+  const start = logTimeStartInput.value ? new Date(logTimeStartInput.value).getTime() : null
+  const end = logTimeEndInput.value ? new Date(logTimeEndInput.value).getTime() : null
+  gameStore.setLogFilterTimeRange(start, end)
+}
+
+function applyLogSearch() {
+  gameStore.setLogSearchQuery(logSearchInput.value)
+}
+
+function resetLogFilters() {
+  logSearchInput.value = ''
+  logTimeStartInput.value = ''
+  logTimeEndInput.value = ''
+  gameStore.clearLogFilter()
+}
+
+function getPhaseNameForLog(phaseId: string | undefined): string {
+  if (!phaseId) return '初始阶段'
+  const phase = gameStore.phaseOptions.find(p => p.id === phaseId)
+  return phase ? `阶段${phase.number}：${phase.name}` : phaseId
+}
 
 const activeTab = ref<'investigation' | 'mails' | 'documents' | 'phases'>('investigation')
 
@@ -832,16 +891,94 @@ function handleSkipRecovery() {
               </div>
             </div>
 
+            <div class="log-filter-section">
+              <div class="log-filter-row">
+                <input
+                  type="text"
+                  class="log-search-input"
+                  v-model="logSearchInput"
+                  placeholder="🔍 搜索日志内容..."
+                  @input="applyLogSearch"
+                />
+                <button class="log-filter-reset-btn" @click="resetLogFilters" title="重置筛选">↺</button>
+              </div>
+
+              <div class="log-filter-group">
+                <span class="filter-group-label">事件类型</span>
+                <div class="filter-chips">
+                  <button
+                    v-for="opt in LOG_TYPE_OPTIONS"
+                    :key="opt.type"
+                    class="filter-chip"
+                    :class="{ active: isLogTypeFiltered(opt.type) }"
+                    @click="toggleLogTypeFilter(opt.type)"
+                  >{{ opt.label }}</button>
+                </div>
+              </div>
+
+              <div class="log-filter-group" v-if="gameStore.phaseOptions.length > 0">
+                <span class="filter-group-label">案件阶段</span>
+                <div class="filter-chips">
+                  <button
+                    class="filter-chip"
+                    :class="{ active: isPhaseFiltered('__no_phase__') }"
+                    @click="togglePhaseFilter('__no_phase__')"
+                  >📌 初始阶段</button>
+                  <button
+                    v-for="phase in gameStore.phaseOptions"
+                    :key="phase.id"
+                    class="filter-chip"
+                    :class="{ active: isPhaseFiltered(phase.id) }"
+                    @click="togglePhaseFilter(phase.id)"
+                  >📋 {{ phase.name }}</button>
+                </div>
+              </div>
+
+              <div class="log-filter-group">
+                <span class="filter-group-label">时间范围</span>
+                <div class="log-time-filter-row">
+                  <input
+                    type="datetime-local"
+                    class="log-time-input"
+                    v-model="logTimeStartInput"
+                    @change="applyLogTimeFilter"
+                  />
+                  <span class="time-separator">—</span>
+                  <input
+                    type="datetime-local"
+                    class="log-time-input"
+                    v-model="logTimeEndInput"
+                    @change="applyLogTimeFilter"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="log-navigation-bar" v-if="gameStore.filteredGameLog.length > 0">
+              <button class="nav-btn" @click="gameStore.navigateLogFirst()" title="最早">⏮</button>
+              <button class="nav-btn" @click="gameStore.navigateLogPrev()" title="上一条">◀</button>
+              <span class="nav-position">
+                {{ gameStore.logNavigation.currentIndex >= 0 ? gameStore.logNavigation.currentIndex + 1 : 0 }} / {{ gameStore.filteredGameLog.length }}
+              </span>
+              <button class="nav-btn" @click="gameStore.navigateLogNext()" title="下一条">▶</button>
+              <button class="nav-btn" @click="gameStore.navigateLogLast()" title="最新">⏭</button>
+            </div>
+
             <div class="log-list-container">
               <div class="log-list">
                 <div 
-                  v-for="log in gameStore.gameState.gameLog.slice().reverse()" 
+                  v-for="log in gameStore.filteredGameLog.slice().reverse()" 
                   :key="log.id"
                   class="log-entry"
-                  :class="`log-type-${log.type}`"
+                  :class="[
+                    `log-type-${log.type}`,
+                    { 'log-focused': gameStore.logNavigation.focusedLogId === log.id }
+                  ]"
+                  @click="gameStore.navigateToLog(log.id)"
                 >
                   <div class="log-entry-header">
                     <span class="log-type-badge">{{ getLogTypeLabel(log.type) }}</span>
+                    <span class="log-phase-badge" v-if="log.details?.phaseId">{{ getPhaseNameForLog(log.details.phaseId as string) }}</span>
                     <span class="log-time">{{ formatLogTime(log.timestamp) }}</span>
                   </div>
                   <div class="log-description">{{ log.description }}</div>
@@ -850,7 +987,12 @@ function handleSkipRecovery() {
             </div>
 
             <div class="log-footer">
-              <span class="log-count">共 {{ gameStore.gameState.gameLog.length }} 条记录</span>
+              <span class="log-count">
+                筛选结果 {{ gameStore.filteredGameLog.length }} / {{ gameStore.gameState.gameLog.length }} 条记录
+              </span>
+              <span class="log-filter-hint" v-if="gameStore.filteredGameLog.length !== gameStore.gameState.gameLog.length">
+                · 已筛选
+              </span>
             </div>
           </div>
         </div>
@@ -1807,9 +1949,9 @@ function handleSkipRecovery() {
 }
 
 .game-log-panel {
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
+  max-width: 650px;
+  width: 92%;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
 }
@@ -1868,10 +2010,11 @@ function handleSkipRecovery() {
 .log-list-container {
   flex: 1;
   overflow-y: auto;
-  max-height: 400px;
+  max-height: 350px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.15);
+  scroll-behavior: smooth;
 }
 
 .log-list {
@@ -1886,13 +2029,11 @@ function handleSkipRecovery() {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   border-left: 3px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.15s;
 }
-
-.log-entry-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.25rem;
+.log-entry:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .log-type-badge {
@@ -1921,6 +2062,192 @@ function handleSkipRecovery() {
 .log-entry.log-type-penalty { border-left-color: #e91e63; }
 .log-entry.log-type-bonus { border-left-color: #ffd700; }
 .log-entry.log-type-evidence_refresh { border-left-color: #00bcd4; }
+.log-entry.log-type-connection { border-left-color: #e0a030; }
+.log-entry.log-type-analysis { border-left-color: #7c4dff; }
+.log-entry.log-type-analysis_start { border-left-color: #b388ff; }
+.log-entry.log-type-analysis_complete { border-left-color: #651fff; }
+.log-entry.log-type-conclusion { border-left-color: #ff6f00; }
+.log-entry.log-type-tool_repair { border-left-color: #66bb6a; }
+.log-entry.log-type-tool_break { border-left-color: #ef5350; }
+.log-entry.log-type-material_drop { border-left-color: #ab47bc; }
+.log-entry.log-type-crafting { border-left-color: #8d6e63; }
+.log-entry.log-type-recipe_unlock { border-left-color: #ffb300; }
+
+.log-entry.log-focused {
+  background: rgba(255, 200, 50, 0.15);
+  box-shadow: 0 0 8px rgba(255, 200, 50, 0.3);
+  border-left-width: 4px;
+}
+
+.log-phase-badge {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  background: rgba(33, 150, 243, 0.2);
+  color: #64b5f6;
+  border-radius: 3px;
+  border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.log-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.log-filter-section {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.log-filter-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.log-search-input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  outline: none;
+}
+.log-search-input:focus {
+  border-color: var(--color-accent);
+}
+
+.log-filter-reset-btn {
+  padding: 0.35rem 0.6rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+.log-filter-reset-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--color-text);
+}
+
+.log-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.filter-group-label {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  font-weight: bold;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.filter-chip {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.filter-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+}
+.filter-chip.active {
+  background: rgba(var(--color-accent-rgb, 100, 180, 255), 0.2);
+  border-color: var(--color-accent);
+  color: var(--color-accent-light);
+}
+
+.log-time-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.log-time-input {
+  padding: 0.3rem 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  font-size: 0.75rem;
+  outline: none;
+  flex: 1;
+}
+.log-time-input:focus {
+  border-color: var(--color-accent);
+}
+.log-time-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+.time-separator {
+  color: var(--color-text-dim);
+  font-size: 0.8rem;
+}
+
+.log-navigation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+.nav-btn {
+  padding: 0.25rem 0.6rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+.nav-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--color-accent);
+}
+
+.nav-position {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  min-width: 5rem;
+  text-align: center;
+}
+
+.log-filter-hint {
+  color: var(--color-accent);
+  font-weight: bold;
+}
 
 .log-footer {
   padding-top: 0.75rem;
