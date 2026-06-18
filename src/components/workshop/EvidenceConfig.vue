@@ -24,7 +24,18 @@ const evidenceTypeOptions = [
   { value: 'document', label: '📄 文档' },
   { value: 'object', label: '🔍 物品' },
   { value: 'trace', label: '👣 痕迹' },
-  { value: 'testimony', label: '💬 证词' }
+  { value: 'testimony', label: '💬 证词' },
+  { value: 'image', label: '🖼️ 图片' },
+  { value: 'text_fragment', label: '📜 文本残页' },
+  { value: 'audio', label: '🎙️ 音频' }
+]
+
+const textFragmentStyleOptions = [
+  { value: 'aged_paper', label: '陈旧纸张' },
+  { value: 'burnt_edge', label: '灼烧边缘' },
+  { value: 'torn', label: '撕裂残片' },
+  { value: 'handwritten', label: '手写字迹' },
+  { value: 'typewritten', label: '打字机字体' }
 ]
 
 function selectScene(sceneId: string) {
@@ -79,9 +90,9 @@ function updateSceneDesc(sceneId: string, event: Event) {
   workshopStore.updateScene(sceneId, { description: target.value })
 }
 
-function updateEvidenceField(field: keyof Evidence, value: string | number | boolean | string[]) {
+function updateEvidenceField(field: keyof Evidence, value: string | number | boolean | string[] | undefined) {
   if (!currentScene.value || !currentEvidence.value) return
-  workshopStore.updateEvidence(currentScene.value.id, currentEvidence.value.id, { [field]: value })
+  workshopStore.updateEvidence(currentScene.value.id, currentEvidence.value.id, { [field]: value } as Partial<Evidence>)
 }
 
 function updateEvidenceLocation(axis: 'x' | 'y', value: number) {
@@ -206,6 +217,103 @@ function updateEvidenceSize(dimension: 'width' | 'height', value: number) {
               placeholder="输入证据的详细描述"
               rows="4"
             ></textarea>
+          </div>
+
+          <div v-if="currentEvidence.type === 'image'" class="type-specific-section">
+            <div class="section-divider">
+              <span class="divider-label">🖼️ 图片设置</span>
+            </div>
+            <div class="form-group">
+              <label>图片地址</label>
+              <input
+                type="text"
+                :value="currentEvidence.imageUrl || ''"
+                @input="updateEvidenceField('imageUrl', ($event.target as HTMLInputElement).value)"
+                placeholder="输入图片URL地址"
+              />
+              <span class="field-hint">图片的网络地址或本地路径</span>
+            </div>
+            <div class="form-group">
+              <label>图片描述</label>
+              <input
+                type="text"
+                :value="currentEvidence.imageAlt || ''"
+                @input="updateEvidenceField('imageAlt', ($event.target as HTMLInputElement).value)"
+                placeholder="图片的替代文字/说明"
+              />
+            </div>
+          </div>
+
+          <div v-if="currentEvidence.type === 'text_fragment'" class="type-specific-section">
+            <div class="section-divider">
+              <span class="divider-label">📜 文本残页设置</span>
+            </div>
+            <div class="form-group">
+              <label>残页内容</label>
+              <textarea
+                :value="currentEvidence.textContent || ''"
+                @input="updateEvidenceField('textContent', ($event.target as HTMLTextAreaElement).value)"
+                placeholder="输入文本残页的具体内容"
+                rows="5"
+              ></textarea>
+              <span class="field-hint">留空则使用证据描述作为内容</span>
+            </div>
+            <div class="form-group">
+              <label>纸张样式</label>
+              <select
+                :value="currentEvidence.textFragmentStyle || 'aged_paper'"
+                @change="updateEvidenceField('textFragmentStyle', ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="opt in textFragmentStyleOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="currentEvidence.type === 'audio'" class="type-specific-section">
+            <div class="section-divider">
+              <span class="divider-label">🎙️ 音频设置</span>
+            </div>
+            <div class="form-group">
+              <label>音频地址</label>
+              <input
+                type="text"
+                :value="currentEvidence.audioUrl || ''"
+                @input="updateEvidenceField('audioUrl', ($event.target as HTMLInputElement).value)"
+                placeholder="输入音频URL地址"
+              />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>讲述人</label>
+                <input
+                  type="text"
+                  :value="currentEvidence.audioSpeaker || ''"
+                  @input="updateEvidenceField('audioSpeaker', ($event.target as HTMLInputElement).value)"
+                  placeholder="如：张三"
+                />
+              </div>
+              <div class="form-group">
+                <label>时长(秒)</label>
+                <input
+                  type="number"
+                  :value="currentEvidence.audioDuration || ''"
+                  @input="updateEvidenceField('audioDuration', Number(($event.target as HTMLInputElement).value) || undefined)"
+                  placeholder="如：120"
+                  min="0"
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>文字记录</label>
+              <textarea
+                :value="currentEvidence.audioTranscript || ''"
+                @input="updateEvidenceField('audioTranscript', ($event.target as HTMLTextAreaElement).value)"
+                placeholder="音频的文字转写内容"
+                rows="4"
+              ></textarea>
+            </div>
           </div>
 
           <div class="form-row">
@@ -594,6 +702,27 @@ function updateEvidenceSize(dimension: 'width' | 'height', value: number) {
   width: 18px;
   height: 18px;
   cursor: pointer;
+}
+
+.type-specific-section {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.section-divider {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.divider-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-accent-light);
+  background: rgba(107, 76, 154, 0.1);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
 }
 
 @media (max-width: 1024px) {

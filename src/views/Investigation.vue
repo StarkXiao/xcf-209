@@ -5,7 +5,7 @@ import { useGameStore } from '@/stores/game'
 import { getCaseById } from '@/data/cases'
 import { getToolById } from '@/data/tools'
 import { CORRUPTION_MILESTONES } from '@/data/spiritualPollution'
-import type { Scene, Evidence, HitRateResult } from '@/types'
+import type { Scene, Evidence, HitRateResult, EvidenceType } from '@/types'
 import InventoryPanel from '@/components/inventory/InventoryPanel.vue'
 import CraftingPanel from '@/components/inventory/CraftingPanel.vue'
 import MailInbox from '@/components/mail/MailInbox.vue'
@@ -374,6 +374,43 @@ function getHitRateColor(hitRate: number): string {
 
 function closeEvidenceDetail() {
   showEvidenceDetail.value = false
+}
+
+const EVIDENCE_TYPE_INFO: Record<EvidenceType, { label: string; icon: string }> = {
+  document: { label: '文档', icon: '📄' },
+  object: { label: '物品', icon: '🔍' },
+  trace: { label: '痕迹', icon: '👣' },
+  testimony: { label: '证词', icon: '💬' },
+  image: { label: '图片', icon: '🖼️' },
+  text_fragment: { label: '文本残页', icon: '📜' },
+  audio: { label: '音频', icon: '🎙️' }
+}
+
+function getEvidenceTypeLabel(type: EvidenceType): string {
+  return EVIDENCE_TYPE_INFO[type]?.label || type
+}
+
+function getEvidenceTypeIcon(type: EvidenceType): string {
+  return EVIDENCE_TYPE_INFO[type]?.icon || '📄'
+}
+
+const TEXT_FRAGMENT_STYLES: Record<string, string> = {
+  aged_paper: '陈旧纸张',
+  burnt_edge: '灼烧边缘',
+  torn: '撕裂残片',
+  handwritten: '手写字迹',
+  typewritten: '打字机字体'
+}
+
+function getTextFragmentStyleLabel(style?: string): string {
+  if (!style) return '陈旧纸张'
+  return TEXT_FRAGMENT_STYLES[style] || style
+}
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
 function goToClues() {
@@ -1080,14 +1117,79 @@ function getSparkleStyle(index: number) {
             <div class="evidence-header">
               <h3 class="evidence-name">{{ selectedEvidence.name }}</h3>
               <div class="evidence-type">
-                {{ selectedEvidence.type }}
+                <span class="type-icon">{{ getEvidenceTypeIcon(selectedEvidence.type) }}</span>
+                <span>{{ getEvidenceTypeLabel(selectedEvidence.type) }}</span>
                 <span v-if="selectedEvidence.isSpecial" class="special-badge">★ 特殊</span>
               </div>
             </div>
             
             <div class="evidence-content">
-              <p class="evidence-description">{{ selectedEvidence.description }}</p>
+              <div v-if="selectedEvidence.type === 'image' && (selectedEvidence.imageUrl || selectedEvidence.image)" class="evidence-media-section image-section">
+                <div class="media-container image-container">
+                  <img 
+                    :src="selectedEvidence.imageUrl || selectedEvidence.image" 
+                    :alt="selectedEvidence.imageAlt || selectedEvidence.name"
+                    class="evidence-image"
+                  />
+                </div>
+                <p v-if="selectedEvidence.imageAlt" class="media-caption">{{ selectedEvidence.imageAlt }}</p>
+              </div>
+
+              <div v-else-if="selectedEvidence.type === 'text_fragment'" class="evidence-media-section text-fragment-section">
+                <div class="text-fragment-container" :class="selectedEvidence.textFragmentStyle || 'aged_paper'">
+                  <div class="text-fragment-content">
+                    <p v-if="selectedEvidence.textContent" class="fragment-text">
+                      {{ selectedEvidence.textContent }}
+                    </p>
+                    <p v-else class="fragment-text placeholder">
+                      {{ selectedEvidence.description }}
+                    </p>
+                  </div>
+                </div>
+                <p class="media-hint">文本残页 · {{ getTextFragmentStyleLabel(selectedEvidence.textFragmentStyle) }}</p>
+              </div>
+
+              <div v-else-if="selectedEvidence.type === 'audio'" class="evidence-media-section audio-section">
+                <div class="audio-player-container">
+                  <div class="audio-header">
+                    <span class="audio-icon">🎙️</span>
+                    <div class="audio-info">
+                      <span class="audio-title">{{ selectedEvidence.name }}</span>
+                      <span v-if="selectedEvidence.audioSpeaker" class="audio-speaker">讲述人：{{ selectedEvidence.audioSpeaker }}</span>
+                    </div>
+                    <span v-if="selectedEvidence.audioDuration" class="audio-duration">
+                      {{ formatDuration(selectedEvidence.audioDuration) }}
+                    </span>
+                  </div>
+                  <div v-if="selectedEvidence.audioUrl" class="audio-player">
+                    <audio controls :src="selectedEvidence.audioUrl" class="audio-element">
+                      您的浏览器不支持音频播放
+                    </audio>
+                  </div>
+                  <div v-else class="audio-placeholder">
+                    <span class="placeholder-icon">🔊</span>
+                    <span class="placeholder-text">音频文件暂不可用</span>
+                  </div>
+                </div>
+                <div v-if="selectedEvidence.audioTranscript" class="audio-transcript">
+                  <div class="transcript-header">
+                    <span class="transcript-label">📝 文字记录</span>
+                  </div>
+                  <div class="transcript-content">
+                    {{ selectedEvidence.audioTranscript }}
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="evidence-description-section">
+                <p class="evidence-description">{{ selectedEvidence.description }}</p>
+              </div>
               
+              <div v-if="(selectedEvidence.type === 'image' || selectedEvidence.type === 'audio') && selectedEvidence.description" class="evidence-description-note">
+                <span class="note-label">说明</span>
+                <p class="note-text">{{ selectedEvidence.description }}</p>
+              </div>
+
               <div v-if="selectedEvidence.sanityEffect !== 0" class="sanity-effect">
                 <span class="effect-label">理智影响:</span>
                 <span class="effect-value" :class="{ negative: selectedEvidence.sanityEffect < 0 }">
@@ -2200,6 +2302,255 @@ function getSparkleStyle(index: number) {
 
 .close-btn:hover {
   background: var(--color-accent-light);
+}
+
+.evidence-detail {
+  max-width: 560px;
+}
+
+.type-icon {
+  font-size: 1rem;
+}
+
+.evidence-media-section {
+  margin-bottom: 1.25rem;
+}
+
+.media-container {
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.image-container {
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-height: 350px;
+}
+
+.evidence-image {
+  max-width: 100%;
+  max-height: 350px;
+  object-fit: contain;
+  display: block;
+}
+
+.media-caption {
+  font-size: 0.85rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  font-style: italic;
+  margin: 0;
+}
+
+.text-fragment-section {
+  margin-bottom: 1rem;
+}
+
+.text-fragment-container {
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin-bottom: 0.75rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.text-fragment-container.aged_paper {
+  background: linear-gradient(135deg, #d4c4a8 0%, #c4b393 50%, #b8a67e 100%);
+  color: #3d3020;
+  box-shadow: 
+    inset 0 0 30px rgba(139, 90, 43, 0.3),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.text-fragment-container.burnt_edge {
+  background: linear-gradient(135deg, #c9b896 0%, #b09870 100%);
+  color: #2d2416;
+  box-shadow: 
+    inset 0 0 20px rgba(139, 69, 19, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.3);
+  clip-path: polygon(
+    2% 5%, 8% 2%, 15% 4%, 25% 1%, 35% 3%, 45% 0%, 55% 2%, 65% 1%, 75% 4%, 85% 2%, 95% 5%, 98% 12%,
+    99% 25%, 97% 35%, 100% 45%, 98% 55%, 99% 65%, 97% 75%, 98% 85%, 95% 92%, 90% 97%, 80% 99%,
+    70% 96%, 60% 98%, 50% 99%, 40% 97%, 30% 98%, 20% 96%, 10% 99%, 5% 95%, 2% 88%, 1% 75%,
+    3% 65%, 0% 55%, 2% 45%, 1% 35%, 3% 25%, 1% 15%, 2% 8%
+  );
+}
+
+.text-fragment-container.torn {
+  background: #e8dcc8;
+  color: #3d3020;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  clip-path: polygon(
+    0% 3%, 5% 0%, 12% 2%, 20% 0%, 30% 3%, 40% 1%, 50% 2%, 60% 0%, 70% 2%, 80% 1%, 90% 3%, 98% 0%, 100% 5%,
+    98% 15%, 100% 25%, 97% 35%, 100% 45%, 98% 55%, 100% 65%, 98% 75%, 100% 85%, 97% 95%, 100% 100%,
+    90% 98%, 80% 100%, 70% 97%, 60% 99%, 50% 98%, 40% 100%, 30% 97%, 20% 99%, 10% 98%, 0% 100%,
+    2% 90%, 0% 80%, 3% 70%, 0% 60%, 2% 50%, 0% 40%, 3% 30%, 0% 20%, 2% 10%
+  );
+}
+
+.text-fragment-container.handwritten {
+  background: #f5eedc;
+  color: #2d1810;
+  font-family: 'Georgia', serif;
+  box-shadow: 
+    inset 0 0 15px rgba(139, 90, 43, 0.15),
+    0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.text-fragment-container.typewritten {
+  background: #faf8f0;
+  color: #1a1a1a;
+  font-family: 'Courier New', monospace;
+  box-shadow: 
+    inset 0 0 10px rgba(0, 0, 0, 0.05),
+    0 3px 10px rgba(0, 0, 0, 0.15);
+}
+
+.text-fragment-content {
+  position: relative;
+  z-index: 1;
+}
+
+.fragment-text {
+  line-height: 1.9;
+  margin: 0;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+}
+
+.fragment-text.placeholder {
+  opacity: 0.8;
+  font-style: italic;
+}
+
+.media-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  text-align: center;
+  margin: 0;
+}
+
+.audio-section {
+  margin-bottom: 1rem;
+}
+
+.audio-player-container {
+  background: rgba(107, 76, 154, 0.1);
+  border: 1px solid var(--color-accent);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.audio-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.audio-icon {
+  font-size: 1.75rem;
+}
+
+.audio-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.audio-title {
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.audio-speaker {
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+}
+
+.audio-duration {
+  font-size: 0.8rem;
+  color: var(--color-accent-light);
+  font-family: monospace;
+}
+
+.audio-player {
+  width: 100%;
+}
+
+.audio-element {
+  width: 100%;
+  height: 40px;
+}
+
+.audio-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  color: var(--color-text-dim);
+  font-size: 0.9rem;
+}
+
+.placeholder-icon {
+  font-size: 1.2rem;
+}
+
+.audio-transcript {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 0.75rem;
+  border-left: 3px solid var(--color-accent);
+}
+
+.transcript-header {
+  margin-bottom: 0.5rem;
+}
+
+.transcript-label {
+  font-size: 0.85rem;
+  color: var(--color-accent-light);
+  font-weight: 500;
+}
+
+.transcript-content {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.evidence-description-note {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-left: 3px solid var(--color-text-dim);
+}
+
+.note-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.35rem;
+}
+
+.note-text {
+  color: var(--color-text);
+  line-height: 1.7;
+  margin: 0;
+  font-size: 0.9rem;
 }
 
 .slide-enter-active,

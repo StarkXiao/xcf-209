@@ -141,11 +141,13 @@ export interface Scene {
   unlockBgm?: string
 }
 
+export type EvidenceType = 'document' | 'object' | 'trace' | 'testimony' | 'image' | 'text_fragment' | 'audio'
+
 export interface Evidence {
   id: string
   name: string
   description: string
-  type: 'document' | 'object' | 'trace' | 'testimony'
+  type: EvidenceType
   image?: string
   sanityEffect: number
   discovered: boolean
@@ -162,6 +164,14 @@ export interface Evidence {
   materialDrops?: MaterialDrop[]
   processable?: boolean
   processRecipeId?: string
+  imageUrl?: string
+  imageAlt?: string
+  textContent?: string
+  textFragmentStyle?: 'aged_paper' | 'burnt_edge' | 'torn' | 'handwritten' | 'typewritten'
+  audioUrl?: string
+  audioDuration?: number
+  audioTranscript?: string
+  audioSpeaker?: string
 }
 
 export interface EvidenceDiscoveryTrigger {
