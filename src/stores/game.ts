@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, TempStatusEffect, DeductionValidationResult, EvidenceSufficiencyResult, LogFilterState, LogNavigationState, LogType, DeductionFeedback, SceneUnlockConditionProgress, EndingDeterminationContext, EndingConsequenceSummary } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, TempStatusEffect, DeductionValidationResult, EvidenceSufficiencyResult, LogFilterState, LogNavigationState, LogType, DeductionFeedback, SceneUnlockConditionProgress, EndingDeterminationContext, EndingConsequenceSummary, Case } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -130,7 +130,9 @@ export const useGameStore = defineStore('game', () => {
     wrongDeductionAttempts: 0,
     activeSanityRecoveryEvent: null,
     sanityRecoveryEventCooldown: 0,
-    evidenceSearchCounts: {}
+    evidenceSearchCounts: {},
+    completedSideClueGroups: [],
+    sideClueGroupProgress: {}
   })
 
   const tempEvidencePenalty = ref<TempStatusEffect | null>(null)
@@ -340,7 +342,9 @@ export const useGameStore = defineStore('game', () => {
       wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
       sanityRecoveryEventCooldown: 0,
-      evidenceSearchCounts: {}
+      evidenceSearchCounts: {},
+      completedSideClueGroups: [],
+      sideClueGroupProgress: {}
     }
 
     tempEvidencePenalty.value = null
@@ -775,6 +779,7 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('evidence_discovered', evidenceId)
     updateDeductionCompleteness()
+    updateSideClueGroups()
 
     return true
   }
@@ -789,6 +794,7 @@ export const useGameStore = defineStore('game', () => {
     const bestiaryStore = useBestiaryStore()
     bestiaryStore.checkAndUnlockOnClue(clueId, false)
     
+    updateSideClueGroups()
     return true
   }
 
@@ -895,6 +901,7 @@ export const useGameStore = defineStore('game', () => {
     checkPhaseProgression()
     checkMailDelivery('clue_analyzed', clueId)
     updateDeductionCompleteness()
+    updateSideClueGroups()
     
     return { 
       success: true, 
@@ -1048,6 +1055,7 @@ export const useGameStore = defineStore('game', () => {
     
     checkEvidenceRefresh('after_scene_switch', { sceneId })
     checkMailDelivery('scene_visited', sceneId)
+    updateSideClueGroups()
   }
 
   function triggerRandomEvents(triggerType: SceneEvent['triggerCondition']['type']) {
@@ -1496,6 +1504,148 @@ export const useGameStore = defineStore('game', () => {
     return gameState.value.timerState.totalSeconds - gameState.value.timerState.remainingSeconds
   }
 
+  function checkSideClueGroupRequirement(
+    requirement: import('@/types').SideClueGroupRequirement
+  ): { satisfied: boolean; discoveredIds: string[] } {
+    const { type, requiredIds, minCount } = requirement
+    let discoveredIds: string[] = []
+    let satisfied = false
+
+    switch (type) {
+      case 'evidence':
+        discoveredIds = requiredIds.filter(id => gameState.value.discoveredEvidence.includes(id))
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+      case 'clue':
+        discoveredIds = requiredIds.filter(id => gameState.value.discoveredClues.includes(id))
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+      case 'clue_analyzed':
+        discoveredIds = requiredIds.filter(id => gameState.value.analyzedClues.includes(id))
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+      case 'clue_connection':
+        discoveredIds = requiredIds.filter(id => 
+          gameState.value.clueConnections.some(c => 
+            c.clue1Id === id || c.clue2Id === id
+          )
+        )
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+      case 'scene_visited':
+        discoveredIds = requiredIds.filter(id => gameState.value.visitedScenes.includes(id))
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+      case 'branch_unlocked':
+        discoveredIds = requiredIds.filter(id => gameState.value.deductionBranches.includes(id))
+        satisfied = minCount !== undefined
+          ? discoveredIds.length >= minCount
+          : discoveredIds.length === requiredIds.length
+        break
+    }
+
+    return { satisfied, discoveredIds }
+  }
+
+  function checkSideClueGroup(group: import('@/types').SideClueGroup): { 
+    isCompleted: boolean
+    completedRequirements: string[]
+    allDiscoveredIds: string[]
+  } {
+    let allSatisfied = true
+    const allDiscoveredIds: string[] = []
+
+    for (const req of group.requirements) {
+      const result = checkSideClueGroupRequirement(req)
+      if (!result.satisfied) {
+        allSatisfied = false
+      }
+      allDiscoveredIds.push(...result.discoveredIds)
+    }
+
+    return {
+      isCompleted: allSatisfied,
+      completedRequirements: allSatisfied ? group.requirements.map((_, i) => `req-${i}`) : [],
+      allDiscoveredIds: [...new Set(allDiscoveredIds)]
+    }
+  }
+
+  function updateSideClueGroups() {
+    const caseData = currentCase.value
+    if (!caseData?.sideClueGroups || caseData.sideClueGroups.length === 0) {
+      return
+    }
+
+    const newlyCompleted: string[] = []
+
+    for (const group of caseData.sideClueGroups) {
+      const result = checkSideClueGroup(group)
+      const currentProgress = gameState.value.sideClueGroupProgress[group.id]
+
+      if (result.isCompleted && !currentProgress?.isCompleted) {
+        newlyCompleted.push(group.id)
+        gameState.value.sideClueGroupProgress[group.id] = {
+          groupId: group.id,
+          isCompleted: true,
+          completedAt: Date.now(),
+          discoveredRequirements: result.allDiscoveredIds
+        }
+        if (!gameState.value.completedSideClueGroups.includes(group.id)) {
+          gameState.value.completedSideClueGroups.push(group.id)
+        }
+      } else if (!currentProgress) {
+        gameState.value.sideClueGroupProgress[group.id] = {
+          groupId: group.id,
+          isCompleted: false,
+          discoveredRequirements: result.allDiscoveredIds
+        }
+      } else {
+        gameState.value.sideClueGroupProgress[group.id] = {
+          ...currentProgress,
+          discoveredRequirements: result.allDiscoveredIds
+        }
+      }
+    }
+
+    for (const groupId of newlyCompleted) {
+      const group = caseData.sideClueGroups.find(g => g.id === groupId)
+      if (group) {
+        addLog('discovery', `✨ 解锁支线线索组：${group.name}`, {
+          sideClueGroupId: groupId,
+          groupName: group.name,
+          groupCategory: group.category
+        })
+        if (group.rewardText) {
+          addLog('bonus', group.rewardText)
+        }
+      }
+    }
+
+    return newlyCompleted
+  }
+
+  function getSideClueGroupProgress(groupId: string): import('@/types').SideClueGroupProgress | null {
+    return gameState.value.sideClueGroupProgress[groupId] || null
+  }
+
+  function getAllCompletedSideClueGroups(): import('@/types').SideClueGroup[] {
+    const caseData = currentCase.value
+    if (!caseData?.sideClueGroups) return []
+    return caseData.sideClueGroups.filter(g => 
+      gameState.value.completedSideClueGroups.includes(g.id)
+    )
+  }
+
   function buildEndingContext(isCorrectConclusion: boolean): EndingDeterminationContext {
     const caseData = currentCase.value
     if (!caseData) {
@@ -1507,7 +1657,9 @@ export const useGameStore = defineStore('game', () => {
         isCorrectConclusion,
         wrongDeductionAttempts: gameState.value.wrongDeductionAttempts,
         analyzedClueRatio: 0,
-        clueConnectionRatio: 0
+        clueConnectionRatio: 0,
+        completedSideClueGroups: [],
+        sideClueGroupDetails: []
       }
     }
 
@@ -1526,6 +1678,9 @@ export const useGameStore = defineStore('game', () => {
     const totalClueCount = Math.max(5, caseData.clues.length * 0.6)
     const clueConnectionRatio = Math.min(1, gameState.value.clueConnections.length / totalClueCount)
 
+    const completedSideClueGroups = gameState.value.completedSideClueGroups
+    const sideClueGroupDetails = Object.values(gameState.value.sideClueGroupProgress)
+
     return {
       evidenceRatio,
       keyEvidenceDiscoveredCount,
@@ -1534,7 +1689,9 @@ export const useGameStore = defineStore('game', () => {
       isCorrectConclusion,
       wrongDeductionAttempts: gameState.value.wrongDeductionAttempts,
       analyzedClueRatio,
-      clueConnectionRatio
+      clueConnectionRatio,
+      completedSideClueGroups,
+      sideClueGroupDetails
     }
   }
 
@@ -1546,6 +1703,76 @@ export const useGameStore = defineStore('game', () => {
       gameState.value.maxSanity,
       context
     )
+  }
+
+  function applySideClueEffects(
+    ending: EndingDescriptor,
+    caseData: Case
+  ): {
+    modifiedEnding: EndingDescriptor
+    additionalParagraphs: string[]
+    easterEggs: string[]
+    affectedGroups: string[]
+  } {
+    const sideClueGroups = caseData.sideClueGroups || []
+    const completedGroups = gameState.value.completedSideClueGroups
+    
+    let modifiedEnding: EndingDescriptor = { ...ending }
+    const additionalParagraphs: string[] = []
+    const easterEggs: string[] = []
+    const affectedGroups: string[] = []
+
+    if (sideClueGroups.length === 0 || completedGroups.length === 0) {
+      return { modifiedEnding, additionalParagraphs, easterEggs, affectedGroups }
+    }
+
+    for (const group of sideClueGroups) {
+      if (!completedGroups.includes(group.id)) continue
+      
+      for (const effect of group.endingEffects) {
+        if (effect.endingId !== ending.id) continue
+        
+        affectedGroups.push(group.id)
+
+        if (effect.alternateDescription) {
+          modifiedEnding.description = effect.alternateDescription
+        } else {
+          let newDescription = ending.description
+          if (effect.descriptionPrefix) {
+            newDescription = effect.descriptionPrefix + '\n\n' + newDescription
+          }
+          if (effect.descriptionSuffix) {
+            newDescription = newDescription + '\n\n' + effect.descriptionSuffix
+          }
+          modifiedEnding.description = newDescription
+        }
+
+        if (effect.additionalParagraphs) {
+          additionalParagraphs.push(...effect.additionalParagraphs)
+        }
+
+        if (effect.unlocksEasterEgg && effect.easterEggContent) {
+          easterEggs.push(effect.easterEggContent)
+        }
+
+        if (modifiedEnding.endingFlavor) {
+          if (effect.toneShift) {
+            modifiedEnding.endingFlavor = {
+              ...modifiedEnding.endingFlavor,
+              tone: effect.toneShift
+            }
+          }
+          if (effect.truthRevealLevelShift) {
+            modifiedEnding.endingFlavor = {
+              ...modifiedEnding.endingFlavor,
+              truthRevealLevel: effect.truthRevealLevelShift
+            }
+          }
+        }
+      }
+    }
+
+    return { modifiedEnding, additionalParagraphs, easterEggs, affectedGroups }
   }
 
   function calculateScore(
@@ -1571,12 +1798,26 @@ export const useGameStore = defineStore('game', () => {
 
     const endingContext = buildEndingContext(isCorrectConclusion)
     const ending = getEndingDescriptor(isCorrectConclusion)
-    const consequenceSummary: EndingConsequenceSummary = generateEndingConsequenceSummary(ending, endingContext)
+    
+    const { 
+      modifiedEnding, 
+      additionalParagraphs, 
+      easterEggs, 
+      affectedGroups 
+    } = applySideClueEffects(ending, caseData)
+    
+    const consequenceSummary: EndingConsequenceSummary = generateEndingConsequenceSummary(modifiedEnding, endingContext)
 
-    addLog('conclusion', `🏆 结局倾向：${ending.name}`)
-    addLog('conclusion', ending.description)
+    addLog('conclusion', `🏆 结局倾向：${modifiedEnding.name}`)
+    addLog('conclusion', modifiedEnding.description)
 
-    if (ending.endingFlavor) {
+    if (additionalParagraphs.length > 0) {
+      for (const paragraph of additionalParagraphs) {
+        addLog('conclusion', paragraph)
+      }
+    }
+
+    if (modifiedEnding.endingFlavor) {
       const toneLabels: Record<string, string> = {
         hopeful: '✨ 基调：充满希望',
         neutral: '📄 基调：中性陈述',
@@ -1584,7 +1825,21 @@ export const useGameStore = defineStore('game', () => {
         tragic: '💔 基调：悲剧收场',
         terrifying: '👁️ 基调：不可名状'
       }
-      addLog('conclusion', toneLabels[ending.endingFlavor.tone] || '')
+      addLog('conclusion', toneLabels[modifiedEnding.endingFlavor.tone] || '')
+    }
+
+    if (easterEggs.length > 0) {
+      addLog('conclusion', '🎉 彩蛋解锁！')
+      for (const egg of easterEggs) {
+        addLog('bonus', egg)
+      }
+    }
+
+    if (affectedGroups.length > 0) {
+      const groupNames = affectedGroups
+        .map(id => caseData.sideClueGroups?.find(g => g.id === id)?.name || id)
+        .join('、')
+      addLog('conclusion', `📚 受支线线索组影响：${groupNames}`)
     }
 
     addLog('conclusion', `📋 收束分析：侦探命运——${consequenceSummary.detectiveFate}`)
@@ -1653,6 +1908,12 @@ export const useGameStore = defineStore('game', () => {
     
     if (branchId === 'deep-truth') {
       bonusScore += 15
+    }
+
+    const completedSideClueGroups = gameState.value.completedSideClueGroups.length
+    if (completedSideClueGroups > 0) {
+      bonusScore += completedSideClueGroups * 10
+      addLog('bonus', `支线线索组奖励：+${completedSideClueGroups * 10} 分（完成 ${completedSideClueGroups} 个支线线索组）`)
     }
 
     const intelligenceCompleteness = gameState.value.intelligenceState.deductionInfoCompleteness
@@ -2616,7 +2877,9 @@ export const useGameStore = defineStore('game', () => {
       wrongDeductionAttempts: 0,
       activeSanityRecoveryEvent: null,
       sanityRecoveryEventCooldown: 0,
-      evidenceSearchCounts: {}
+      evidenceSearchCounts: {},
+      completedSideClueGroups: [],
+      sideClueGroupProgress: {}
     }
 
     tempEvidencePenalty.value = null
@@ -3288,6 +3551,10 @@ export const useGameStore = defineStore('game', () => {
     shockPercentage,
     erosionPercentage,
     buildEndingContext,
+    updateSideClueGroups,
+    getSideClueGroupProgress,
+    getAllCompletedSideClueGroups,
+    applySideClueEffects,
     startCase,
     modifySanity,
     addPollution,

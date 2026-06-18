@@ -744,7 +744,132 @@ export const cases = reactive<Case[]>([
           isNgPlusExclusive: true
         }
       ]
-    }
+    },
+    sideClueGroups: [
+      {
+        id: 'side-lighthouse-keeper-story',
+        name: '守望者的往事',
+        description: '收集关于守望者个人背景的线索，了解他为何来到这座孤岛。',
+        category: 'character_lore',
+        icon: '📖',
+        requirements: [
+          {
+            type: 'evidence',
+            requiredIds: ['evidence-diary', 'evidence-letter', 'evidence-photo']
+          }
+        ],
+        endingEffects: [
+          {
+            endingId: 'truth_seeker',
+            descriptionSuffix: '你不仅揭开了案件的真相，也读懂了一个孤独灵魂的抉择。守望者不是疯子，他只是在绝望中找到了自己的归宿。',
+            additionalParagraphs: [
+              '【番外：守望者的日记残页】',
+              '"第127天，我终于听懂了那些低语。它们不是诅咒，而是召唤。祖先的血脉在我体内觉醒，我终于明白了爷爷为什么选择留在这里。"',
+              '"第156天，协会的人来了。他们以为自己能控制深渊，真是可笑。但他们带来的钱足够让妹妹治病了。就这样吧。"',
+              '"最后一页：如果有人看到这本日记，请告诉我的妹妹——哥哥在海里找到了回家的路。"'
+            ]
+          },
+          {
+            endingId: 'lucky_break',
+            descriptionSuffix: '虽然证据链不够完整，但你拼凑出了守望者的故事。他不是第一个，也不会是最后一个...'
+          }
+        ],
+        rewardText: '解锁守望者的个人故事',
+        isHidden: false,
+        discoveryHint: '收集更多关于守望者的个人物品'
+      },
+      {
+        id: 'side-deep-sea-society',
+        name: '深海研究协会',
+        description: '调查这个神秘组织的真实目的和背景。',
+        category: 'world_building',
+        icon: '🏛️',
+        requirements: [
+          {
+            type: 'evidence',
+            requiredIds: ['evidence-letter', 'evidence-locked-drawer', 'evidence-amulet']
+          },
+          {
+            type: 'clue_analyzed',
+            requiredIds: ['clue-organization', 'clue-ritual']
+          }
+        ],
+        endingEffects: [
+          {
+            endingId: 'truth_seeker',
+            descriptionSuffix: '你发现了深海研究协会的秘密——他们不是研究者，而是信奉者。整个案件不过是他们漫长计划中的一小步。',
+            additionalParagraphs: [
+              '【机密档案：深海研究协会】',
+              '这个组织表面上是海洋研究机构，实际上是一个古老教派的现代分支。他们相信，通过特定的仪式，可以与深海中的古老存在建立联系。',
+              '守望者是他们选中的"容器"——一个拥有特殊血脉的人，自愿成为深渊与人间的桥梁。',
+              '更令人不安的是，协会的成员遍布社会各个阶层。这个案件的结束，只是你触及冰山的一角...'
+            ]
+          }
+        ],
+        rewardText: '解锁深海研究协会的背景设定',
+        isHidden: false,
+        discoveryHint: '调查神秘信件和仪式相关的物品'
+      },
+      {
+        id: 'side-hidden-creature',
+        name: '深潜者的真相',
+        description: '发现关于深潜者的更多秘密。',
+        category: 'hidden_truth',
+        icon: '🐙',
+        requirements: [
+          {
+            type: 'evidence',
+            requiredIds: ['evidence-hidden-mark', 'evidence-whisper', 'evidence-deep-statue', 'evidence-ngplus-ancient-manuscript']
+          }
+        ],
+        endingEffects: [
+          {
+            endingId: 'truth_seeker',
+            alternateDescription: '你以钢铁般的意志承受了一切，将真相公之于众。但你也知道了那个可怕的事实——深潜者不是怪物，而是人类的远亲。他们的血脉，也流淌在我们之中。',
+            truthRevealLevelShift: 'full',
+            unlocksEasterEgg: true,
+            easterEggContent: '🎉 彩蛋：你注意到自己的指尖似乎有些发痒...在阳光下，你仿佛看到了指间若隐若现的蹼。是幻觉，还是血脉的觉醒？'
+          },
+          {
+            endingId: 'martyr',
+            descriptionSuffix: '在疗养院的白色房间里，你偶尔会画下一些奇怪的符文。护士说那是毫无意义的涂鸦，但你知道——那是深潜者的文字。',
+            toneShift: 'terrifying'
+          }
+        ],
+        rewardText: '解锁深潜者的隐藏真相',
+        isHidden: true,
+        priority: 10
+      },
+      {
+        id: 'side-easter-egg-cthulhu',
+        name: '克苏鲁的呼唤',
+        description: '发现隐藏的彩蛋——致敬克苏鲁神话的细节。',
+        category: 'easter_egg',
+        icon: '🥚',
+        requirements: [
+          {
+            type: 'clue',
+            requiredIds: ['clue-call-of-deep', 'clue-deep-one', 'clue-covenant']
+          }
+        ],
+        endingEffects: [
+          {
+            endingId: 'truth_seeker',
+            unlocksEasterEgg: true,
+            easterEggContent: '🎮 彩蛋：你发现了所有克苏鲁神话的致敬元素！达贡、克苏鲁、深潜者、拉莱耶...H.P.洛夫克拉夫特的灵魂在某处微笑。',
+            additionalParagraphs: [
+              '【开发者的话】',
+              '感谢你探索这个案件的每一个角落。这个故事致敬了H.P.洛夫克拉夫特的克苏鲁神话体系。',
+              '如果你喜欢这类故事，推荐阅读《克苏鲁的呼唤》、《阴影中的因斯茅斯》等经典作品。',
+              '记住：最古老的恐惧，是对未知的恐惧。——但探索未知，正是人类最伟大的本能。'
+            ]
+          }
+        ],
+        rewardText: '解锁克苏鲁神话彩蛋',
+        isHidden: true,
+        discoveryHint: '也许某些线索的名字和描述里藏着惊喜...'
+      }
+    ]
   },
   {
     id: 'case-002',

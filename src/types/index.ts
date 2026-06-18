@@ -1695,3 +1695,66 @@ export interface LogNavigationState {
   focusedLogId: string | null
   currentIndex: number
 }
+
+export type SideClueGroupCategory = 
+  | 'background_story'
+  | 'character_lore'
+  | 'hidden_truth'
+  | 'easter_egg'
+  | 'world_building'
+  | 'secret_ending'
+
+export interface SideClueGroupRequirement {
+  type: 'evidence' | 'clue' | 'clue_analyzed' | 'clue_connection' | 'scene_visited' | 'branch_unlocked'
+  requiredIds: string[]
+  minCount?: number
+}
+
+export interface EndingTextModifier {
+  endingId: EndingAlignment
+  additionalParagraphs?: string[]
+  descriptionSuffix?: string
+  descriptionPrefix?: string
+  alternateDescription?: string
+  toneShift?: 'hopeful' | 'neutral' | 'melancholic' | 'tragic' | 'terrifying'
+  truthRevealLevelShift?: 'full' | 'partial' | 'obscured' | 'none' | 'distorted' | 'hidden'
+  unlocksEasterEgg?: boolean
+  easterEggContent?: string
+}
+
+export interface SideClueGroup {
+  id: string
+  name: string
+  description: string
+  category: SideClueGroupCategory
+  icon?: string
+  requirements: SideClueGroupRequirement[]
+  endingEffects: EndingTextModifier[]
+  rewardText?: string
+  isHidden?: boolean
+  discoveryHint?: string
+  priority?: number
+}
+
+export interface SideClueGroupProgress {
+  groupId: string
+  isCompleted: boolean
+  completedAt?: number
+  discoveredRequirements: string[]
+}
+
+declare module './index' {
+  interface Case {
+    sideClueGroups?: SideClueGroup[]
+  }
+  
+  interface GameState {
+    completedSideClueGroups: string[]
+    sideClueGroupProgress: Record<string, SideClueGroupProgress>
+  }
+  
+  interface EndingDeterminationContext {
+    completedSideClueGroups: string[]
+    sideClueGroupDetails: SideClueGroupProgress[]
+  }
+}
