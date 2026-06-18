@@ -9,7 +9,11 @@ import type {
   GraphValidationError,
   GraphValidationWarning,
   GraphPlaybackState,
-  RelationshipType
+  RelationshipType,
+  RelationshipStrength,
+  RelationshipStrengthLevel,
+  ConflictInfo,
+  ConnectionPreview
 } from '@/types'
 import { RELATIONSHIP_TYPES } from '@/types'
 import { getCaseById } from '@/data/cases'
@@ -48,6 +52,8 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
   const validationResult = ref<GraphValidationResult | null>(null)
   const errorMessages = ref<{ id: string; message: string; type: 'error' | 'warning' }[]>([])
   const autoSaveTimer = ref<number | null>(null)
+  const connectionPreview = ref<ConnectionPreview | null>(null)
+  const hoveredNodeId = ref<string | null>(null)
 
   const nodes = computed(() => graphState.value.nodes)
   const edges = computed(() => graphState.value.edges)
@@ -405,6 +411,21 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       actualConfidence = gameStore.getConnectionSuccessRate(sourceId, targetId)
     }
 
+    const strength = calculateRelationshipStrength(sourceId, targetId, relationship as RelationshipType)
+    const conflicts = detectConflicts(sourceId, targetId, relationship as RelationshipType)
+    const improvementTips = getImprovementTips(sourceId, targetId)
+
+    let feedbackMessage = ''
+    if (strength.level === 'very_strong') {
+      feedbackMessage = `✨ 关联强度极强！推理逻辑非常清晰`
+    } else if (strength.level === 'strong') {
+      feedbackMessage = `👍 关联强度较强，有充分的推理依据`
+    } else if (strength.level === 'moderate') {
+      feedbackMessage = `🤔 关联强度中等，建议补充更多证据`
+    } else {
+      feedbackMessage = `⚠️ 关联强度较弱，需要更多证据支持`
+    }
+
     const newEdge: GraphEdge = {
       id: generateId(),
       sourceId,
@@ -412,7 +433,11 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       relationship,
       confidence: actualConfidence,
       confirmed: false,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      strength,
+      conflicts,
+      feedbackMessage,
+      improvementTips
     }
 
     const beforeState = { edges: [...graphState.value.edges] }
@@ -435,6 +460,15 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       supportedBy: [],
       createdAt: Date.now()
     })
+
+    if (conflicts.length > 0) {
+      const highSeverityConflicts = conflicts.filter(c => c.severity === 'high')
+      if (highSeverityConflicts.length > 0) {
+        addError(`⚠️ 检测到 ${highSeverityConflicts.length} 个严重冲突，请检查推理逻辑`, 'error')
+      } else {
+        addError(`⚠️ 检测到 ${conflicts.length} 个潜在冲突，请注意`, 'warning')
+      }
+    }
 
     validateGraph()
     return newEdge
@@ -496,6 +530,351 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     validateGraph()
   }
 
+  function getStrengthLevel(score: number): RelationshipStrengthLevel {
+    if (score >= 80) return 'very_strong'
+    if (score >= 60) return 'strong'
+    if (score >= 40) return 'moderate'
+    return 'weak'
+  }
+
+  function getStrengthLabel(level: RelationshipStrengthLevel): string {
+    const labels: Record<RelationshipStrengthLevel, string> = {
+      'weak': '微弱',
+      'moderate': '中等',
+      'strong': '较强',
+      'very_strong': '极强'
+    }
+    return labels[level]
+  }
+
+  function calculateRelationshipStrength(
+    sourceId: string, 
+    targetId: string, 
+    relationship: RelationshipType
+  ): RelationshipStrength {
+    const factors: RelationshipStrength['factors'] = []
+    let totalScore = 0
+
+    const comparison = gameStore.getComparisonBetween(sourceId, targetId)
+    if (comparison) {
+      const contribution = comparison.supportsConnection 
+        ? Math.min(comparison.connectionConfidence * 0.3, 25)
+        : -Math.min((100 - comparison.connectionConfidence) * 0.2, 15)
+      factors.push({
+        type: 'comparison',
+        description: comparison.supportsConnection 
+          ? `线索比对支持此关联（${comparison.similarities.length}个相似点）`
+          : `线索比对存在疑问（${comparison.differences.length}个差异点）`,
+        contribution
+      })
+      totalScore += contribution
+    }
+
+    const avgConfidence = gameStore.getAverageConfidenceForClues([sourceId, targetId])
+    const confidenceContribution = (avgConfidence - 50) * 0.4
+    factors.push({
+      type: 'confidence',
+      description: `线索可信度加权（平均${avgConfidence}%）`,
+      contribution: Math.round(confidenceContribution * 10) / 10
+    })
+    totalScore += confidenceContribution
+
+    const clue1 = gameStore.getClueById(sourceId)
+    const clue2 = gameStore.getClueById(targetId)
+    if (clue1 && clue2) {
+      if (clue1.connections.includes(targetId) || clue2.connections.includes(sourceId)) {
+        factors.push({
+          type: 'canonical',
+          description: '案件数据隐含此关联',
+          contribution: 20
+        })
+        totalScore += 20
+      }
+      if (clue1.type === clue2.type) {
+        factors.push({
+          type: 'type_match',
+          description: `同类型线索（${clue1.type}）`,
+          contribution: 10
+        })
+        totalScore += 10
+      }
+    }
+
+    const annotations1 = gameStore.getAnnotationsForClue(sourceId)
+    const annotations2 = gameStore.getAnnotationsForClue(targetId)
+    const relevantAnnotations = [...annotations1, ...annotations2].filter(a => 
+      a.type === 'important' || a.type === 'hypothesis' || a.type === 'contradiction'
+    )
+    const annotationContribution = Math.min(relevantAnnotations.length * 5, 20)
+    if (annotationContribution > 0) {
+      factors.push({
+        type: 'annotation',
+        description: `${relevantAnnotations.length}条相关批注支持推理`,
+        contribution: annotationContribution
+      })
+      totalScore += annotationContribution
+    }
+
+    if (relationship === 'contradicts') {
+      const contradictionAnnotations = [...annotations1, ...annotations2].filter(a => 
+        a.type === 'contradiction'
+      )
+      if (contradictionAnnotations.length > 0) {
+        const contradictionBonus = Math.min(contradictionAnnotations.length * 8, 15)
+        factors.push({
+          type: 'evidence',
+          description: `${contradictionAnnotations.length}条矛盾批注支持「矛盾」关系`,
+          contribution: contradictionBonus
+        })
+        totalScore += contradictionBonus
+      }
+    } else if (relationship === 'supports' || relationship === 'causes' || relationship === 'implies') {
+      const hypothesisAnnotations = [...annotations1, ...annotations2].filter(a => 
+        a.type === 'hypothesis'
+      )
+      if (hypothesisAnnotations.length > 0) {
+        const hypothesisBonus = Math.min(hypothesisAnnotations.length * 6, 12)
+        factors.push({
+          type: 'evidence',
+          description: `${hypothesisAnnotations.length}条假设批注支持「${relationshipLabels[relationship]}」关系`,
+          contribution: hypothesisBonus
+        })
+        totalScore += hypothesisBonus
+      }
+    }
+
+    const baseScore = 30
+    totalScore += baseScore
+    totalScore = Math.max(5, Math.min(100, totalScore))
+
+    return {
+      level: getStrengthLevel(totalScore),
+      score: Math.round(totalScore * 10) / 10,
+      factors
+    }
+  }
+
+  function detectConflicts(
+    sourceId: string, 
+    targetId: string, 
+    relationship: RelationshipType,
+    excludeEdgeId?: string
+  ): ConflictInfo[] {
+    const conflicts: ConflictInfo[] = []
+
+    if (relationship === 'contradicts') {
+      const supportingEdge = graphState.value.edges.find(e =>
+        e.id !== excludeEdgeId &&
+        ((e.sourceId === sourceId && e.targetId === targetId) ||
+         (e.sourceId === targetId && e.targetId === sourceId)) &&
+        (e.relationship === 'supports' || e.relationship === 'causes' || e.relationship === 'implies')
+      )
+      if (supportingEdge) {
+        const sourceLabel = graphState.value.nodes.find(n => n.id === sourceId)?.label || sourceId
+        const targetLabel = graphState.value.nodes.find(n => n.id === targetId)?.label || targetId
+        conflicts.push({
+          hasConflict: true,
+          conflictType: 'direct_contradiction',
+          conflictingEdgeId: supportingEdge.id,
+          conflictingEdgeLabel: relationshipLabels[supportingEdge.relationship as RelationshipType] || supportingEdge.relationship,
+          description: `「${sourceLabel}」与「${targetLabel}」已存在「${relationshipLabels[supportingEdge.relationship as RelationshipType]}」关系，与「矛盾」关系直接冲突`,
+          severity: 'high'
+        })
+      }
+    }
+
+    if (relationship === 'supports' || relationship === 'causes' || relationship === 'implies') {
+      const contradictingEdge = graphState.value.edges.find(e =>
+        e.id !== excludeEdgeId &&
+        ((e.sourceId === sourceId && e.targetId === targetId) ||
+         (e.sourceId === targetId && e.targetId === sourceId)) &&
+        e.relationship === 'contradicts'
+      )
+      if (contradictingEdge) {
+        const sourceLabel = graphState.value.nodes.find(n => n.id === sourceId)?.label || sourceId
+        const targetLabel = graphState.value.nodes.find(n => n.id === targetId)?.label || targetId
+        conflicts.push({
+          hasConflict: true,
+          conflictType: 'direct_contradiction',
+          conflictingEdgeId: contradictingEdge.id,
+          conflictingEdgeLabel: '矛盾',
+          description: `「${sourceLabel}」与「${targetLabel}」已存在「矛盾」关系，与「${relationshipLabels[relationship]}」关系直接冲突`,
+          severity: 'high'
+        })
+      }
+    }
+
+    const sourceIncoming = graphState.value.edges.filter(e => 
+      e.targetId === sourceId && e.id !== excludeEdgeId
+    )
+    sourceIncoming.forEach(inEdge => {
+      if (relationship === 'contradicts' && inEdge.relationship === 'supports') {
+        const transitiveTarget = graphState.value.nodes.find(n => n.id === inEdge.sourceId)?.label || inEdge.sourceId
+        const sourceLabel = graphState.value.nodes.find(n => n.id === sourceId)?.label || sourceId
+        const targetLabel = graphState.value.nodes.find(n => n.id === targetId)?.label || targetId
+        conflicts.push({
+          hasConflict: true,
+          conflictType: 'transitive_conflict',
+          conflictingEdgeId: inEdge.id,
+          conflictingEdgeLabel: '支持',
+          description: `「${transitiveTarget}」支持「${sourceLabel}」，但「${sourceLabel}」与「${targetLabel}」矛盾，可能存在推理冲突`,
+          severity: 'medium'
+        })
+      }
+    })
+
+    return conflicts
+  }
+
+  function suggestRelationshipTypes(sourceId: string, targetId: string): {
+    type: RelationshipType
+    label: string
+    confidence: number
+  }[] {
+    const suggestions: { type: RelationshipType; label: string; confidence: number }[] = []
+    const baseRate = gameStore.getConnectionSuccessRate(sourceId, targetId)
+
+    const clue1 = gameStore.getClueById(sourceId)
+    const clue2 = gameStore.getClueById(targetId)
+
+    if (clue1 && clue2) {
+      if (clue1.connections.includes(targetId) || clue2.connections.includes(sourceId)) {
+        suggestions.push({
+          type: 'related_to',
+          label: '相关',
+          confidence: Math.min(100, baseRate + 15)
+        })
+        suggestions.push({
+          type: 'supports',
+          label: '支持',
+          confidence: Math.min(100, baseRate + 10)
+        })
+      } else {
+        suggestions.push({
+          type: 'related_to',
+          label: '相关',
+          confidence: baseRate
+        })
+        suggestions.push({
+          type: 'implies',
+          label: '暗示',
+          confidence: Math.max(20, baseRate - 10)
+        })
+        suggestions.push({
+          type: 'supports',
+          label: '支持',
+          confidence: Math.max(20, baseRate - 5)
+        })
+        suggestions.push({
+          type: 'contradicts',
+          label: '矛盾',
+          confidence: Math.max(10, baseRate - 20)
+        })
+      }
+    }
+
+    return suggestions.sort((a, b) => b.confidence - a.confidence)
+  }
+
+  function getConnectionPreview(sourceId: string, targetId: string): ConnectionPreview | null {
+    if (sourceId === targetId) return null
+
+    const sourceNode = graphState.value.nodes.find(n => n.id === sourceId)
+    const targetNode = graphState.value.nodes.find(n => n.id === targetId)
+    if (!sourceNode || !targetNode) return null
+
+    const estimatedConfidence = gameStore.getConnectionSuccessRate(sourceId, targetId)
+    const suggestedRelationships = suggestRelationshipTypes(sourceId, targetId)
+    const primaryRelationship = suggestedRelationships[0]?.type || 'related_to'
+    const estimatedStrength = calculateRelationshipStrength(sourceId, targetId, primaryRelationship)
+    const potentialConflicts = detectConflicts(sourceId, targetId, primaryRelationship)
+
+    const warnings: string[] = []
+    const suggestions: string[] = []
+
+    if (estimatedConfidence < 50) {
+      warnings.push(`当前匹配度较低（${estimatedConfidence}%），建议先收集更多证据`)
+    }
+
+    if (estimatedStrength.level === 'weak') {
+      warnings.push('此关联强度较弱，建议先进行线索比对或添加批注')
+    }
+
+    const comparison = gameStore.getComparisonBetween(sourceId, targetId)
+    if (!comparison) {
+      suggestions.push('💡 进行线索比对可以显著提高关联准确性')
+    }
+
+    const annotations1 = gameStore.getAnnotationsForClue(sourceId)
+    const annotations2 = gameStore.getAnnotationsForClue(targetId)
+    if (annotations1.length === 0 && annotations2.length === 0) {
+      suggestions.push('📝 为线索添加批注可以帮助强化推理逻辑')
+    }
+
+    const confidence1 = gameStore.getClueConfidence(sourceId)
+    const confidence2 = gameStore.getClueConfidence(targetId)
+    if (!confidence1 || !confidence2) {
+      suggestions.push('🎯 标记线索可信度可以帮助系统更好地评估关联')
+    }
+
+    if (potentialConflicts.length > 0) {
+      warnings.push(`检测到 ${potentialConflicts.length} 个潜在冲突，请谨慎判断`)
+    }
+
+    return {
+      sourceId,
+      targetId,
+      estimatedStrength,
+      estimatedConfidence,
+      potentialConflicts,
+      suggestedRelationships,
+      warnings,
+      suggestions
+    }
+  }
+
+  function getImprovementTips(sourceId: string, targetId: string): string[] {
+    const tips: string[] = []
+    const comparison = gameStore.getComparisonBetween(sourceId, targetId)
+    
+    if (!comparison) {
+      tips.push('🔍 进行线索比对：分析两条线索的异同点，系统会根据比对结果调整置信度')
+    } else if (!comparison.supportsConnection) {
+      tips.push('⚠️  当前比对结果不支持此关联，建议重新审视两条线索的关系')
+      tips.push('📝 添加批注：记录你的推理过程，标记重要的关联点或疑点')
+    }
+
+    const confidence1 = gameStore.getClueConfidence(sourceId)
+    const confidence2 = gameStore.getClueConfidence(targetId)
+    if (!confidence1 || confidence1.confidence < 60) {
+      tips.push(`🎯 提高「${gameStore.getClueById(sourceId)?.name || sourceId}」的可信度标记`)
+    }
+    if (!confidence2 || confidence2.confidence < 60) {
+      tips.push(`🎯 提高「${gameStore.getClueById(targetId)?.name || targetId}」的可信度标记`)
+    }
+
+    const annotations1 = gameStore.getAnnotationsForClue(sourceId)
+    const annotations2 = gameStore.getAnnotationsForClue(targetId)
+    const hypothesisCount = [...annotations1, ...annotations2].filter(a => a.type === 'hypothesis').length
+    if (hypothesisCount === 0) {
+      tips.push('💭 添加假设性批注：记录你对这条关联的推理假设')
+    }
+
+    tips.push('🔗 尝试建立中间关联：通过第三条线索间接连接可能更可靠')
+    tips.push('📖 回顾案情：重新阅读相关场景的描述，寻找遗漏的细节')
+
+    return tips
+  }
+
+  function updateHoveredNode(nodeId: string | null) {
+    hoveredNodeId.value = nodeId
+    if (connectingFrom.value && nodeId && connectingFrom.value !== nodeId) {
+      connectionPreview.value = getConnectionPreview(connectingFrom.value, nodeId)
+    } else {
+      connectionPreview.value = null
+    }
+  }
+
   function validateGraph(): GraphValidationResult {
     const errors: GraphValidationError[] = []
     const warnings: GraphValidationWarning[] = []
@@ -543,7 +922,14 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
         return
       }
 
-      if (checkConflictingRelationship(edge)) {
+      const conflicts = detectConflicts(edge.sourceId, edge.targetId, edge.relationship as RelationshipType, edge.id)
+      edge.conflicts = conflicts
+
+      if (!edge.strength) {
+        edge.strength = calculateRelationshipStrength(edge.sourceId, edge.targetId, edge.relationship as RelationshipType)
+      }
+
+      if (checkConflictingRelationship(edge) || conflicts.some(c => c.severity === 'high')) {
         errors.push({
           edgeId: edge.id,
           sourceId: edge.sourceId,
@@ -559,6 +945,28 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
       edge.isError = false
       edge.errorMessage = undefined
 
+      if (conflicts.length > 0) {
+        const mediumConflicts = conflicts.filter(c => c.severity === 'medium')
+        const lowConflicts = conflicts.filter(c => c.severity === 'low')
+        
+        if (mediumConflicts.length > 0) {
+          warnings.push({
+            edgeId: edge.id,
+            message: `⚠️ 检测到 ${mediumConflicts.length} 个潜在冲突：${mediumConflicts[0].description}`,
+            type: 'relationship_conflict',
+            severity: 'medium'
+          })
+        }
+        if (lowConflicts.length > 0) {
+          warnings.push({
+            edgeId: edge.id,
+            message: `🔍 存在 ${lowConflicts.length} 个轻微冲突点，请注意`,
+            type: 'relationship_conflict',
+            severity: 'low'
+          })
+        }
+      }
+
       if (!edge.confirmed) {
         warnings.push({
           edgeId: edge.id,
@@ -572,6 +980,15 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
           edgeId: edge.id,
           message: '置信度较低',
           type: 'low_confidence'
+        })
+      }
+
+      if (edge.strength && edge.strength.level === 'weak' && !edge.confirmed) {
+        warnings.push({
+          edgeId: edge.id,
+          message: `💪 关联强度较弱（${edge.strength.score}分），建议补充证据或进行比对`,
+          type: 'weak_connection',
+          severity: 'low'
         })
       }
     })
@@ -717,21 +1134,46 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     
     const sourceId = connectingFrom.value
     connectingFrom.value = null
+    connectionPreview.value = null
 
     const successRate = gameStore.getConnectionSuccessRate(sourceId, targetNodeId)
+    const strength = calculateRelationshipStrength(sourceId, targetNodeId, relationship as RelationshipType)
+    const conflicts = detectConflicts(sourceId, targetNodeId, relationship as RelationshipType)
     const roll = Math.random() * 100
     const isInitiallyCorrect = roll < successRate
+
+    const sourceLabel = graphState.value.nodes.find(n => n.id === sourceId)?.label || sourceId
+    const targetLabel = graphState.value.nodes.find(n => n.id === targetNodeId)?.label || targetNodeId
+    const strengthLabel = getStrengthLabel(strength.level)
+    const relLabel = relationshipLabels[relationship as RelationshipType] || relationship
 
     const result = addEdge(sourceId, targetNodeId, relationship, successRate)
     
     if (result) {
-      if (isInitiallyCorrect) {
-        addError(`连线建立成功！（匹配度 ${successRate}%）`, 'warning')
-        gameStore.addLog('connection', `建立线索关联：${sourceId} ↔ ${targetNodeId}，匹配度 ${successRate}%，初步验证通过`)
+      let feedback = ''
+      if (conflicts.length > 0) {
+        const highConflicts = conflicts.filter(c => c.severity === 'high')
+        if (highConflicts.length > 0) {
+          feedback = `⚠️ 关联已建立，但检测到 ${highConflicts.length} 个严重冲突！「${sourceLabel}」${relLabel}「${targetLabel}」（强度：${strengthLabel}，${strength.score}分）`
+        } else {
+          feedback = `⚠️ 关联已建立，存在 ${conflicts.length} 个潜在冲突。「${sourceLabel}」${relLabel}「${targetLabel}」（强度：${strengthLabel}，${strength.score}分）`
+        }
+      } else if (isInitiallyCorrect) {
+        if (strength.level === 'very_strong' || strength.level === 'strong') {
+          feedback = `✨ 精彩推理！「${sourceLabel}」${relLabel}「${targetLabel}」关联建立成功！（强度：${strengthLabel}，${strength.score}分，匹配度 ${successRate}%）`
+        } else {
+          feedback = `✅ 关联建立成功！「${sourceLabel}」${relLabel}「${targetLabel}」（强度：${strengthLabel}，${strength.score}分，匹配度 ${successRate}%）`
+        }
       } else {
-        addError(`连线已建立，但需要进一步验证（匹配度 ${successRate}%）`, 'warning')
-        gameStore.addLog('connection', `建立线索关联：${sourceId} ↔ ${targetNodeId}，匹配度 ${successRate}%，需要确认`)
+        if (strength.level === 'weak') {
+          feedback = `🤔 关联已建立，但强度较弱，建议补充证据。「${sourceLabel}」${relLabel}「${targetLabel}」（强度：${strengthLabel}，${strength.score}分，匹配度 ${successRate}%）`
+        } else {
+          feedback = `🔍 关联已建立，需要进一步验证。「${sourceLabel}」${relLabel}「${targetLabel}」（强度：${strengthLabel}，${strength.score}分，匹配度 ${successRate}%）`
+        }
       }
+      
+      addError(feedback, strength.level === 'weak' ? 'warning' : 'warning')
+      gameStore.addLog('connection', `建立线索关联：${sourceLabel} ↔ ${targetLabel}，关系：${relLabel}，强度：${strengthLabel}(${strength.score}分)，匹配度 ${successRate}%${isInitiallyCorrect ? '，初步验证通过' : '，需要确认'}`)
     }
     
     return result
@@ -739,6 +1181,8 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
 
   function cancelConnection() {
     connectingFrom.value = null
+    connectionPreview.value = null
+    hoveredNodeId.value = null
   }
 
   function setZoom(zoom: number) {
@@ -776,6 +1220,7 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
 
     const currentConfidence = edge.confidence
     const successRate = gameStore.getConnectionSuccessRate(edge.sourceId, edge.targetId)
+    const strength = edge.strength || calculateRelationshipStrength(edge.sourceId, edge.targetId, edge.relationship as RelationshipType)
     const finalRate = Math.max(currentConfidence, successRate)
 
     const roll = Math.random() * 100
@@ -783,20 +1228,71 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
 
     const sourceLabel = graphState.value.nodes.find(n => n.id === edge.sourceId)?.label || edge.sourceId
     const targetLabel = graphState.value.nodes.find(n => n.id === edge.targetId)?.label || edge.targetId
+    const strengthLabel = getStrengthLabel(strength.level)
+    const improvementTips = getImprovementTips(edge.sourceId, edge.targetId)
+
+    const updatedStrength = calculateRelationshipStrength(edge.sourceId, edge.targetId, edge.relationship as RelationshipType)
+    const conflicts = detectConflicts(edge.sourceId, edge.targetId, edge.relationship as RelationshipType, edgeId)
 
     if (success) {
-      const bonusConfidence = Math.min(100, finalRate + 10)
-      updateEdge(edgeId, { confirmed: true, confidence: bonusConfidence })
-      addError(`✅ 关系确认成功！「${sourceLabel}」与「${targetLabel}」的关系已验证（置信度 ${bonusConfidence}%）`, 'warning')
-      gameStore.addLog('connection', `确认线索关联：${sourceLabel} ↔ ${targetLabel}，验证成功，最终置信度 ${bonusConfidence}%`)
+      const bonusConfidence = Math.min(100, finalRate + 15)
+      updateEdge(edgeId, { 
+        confirmed: true, 
+        confidence: bonusConfidence,
+        strength: updatedStrength,
+        conflicts,
+        feedbackMessage: `✅ 推理正确！「${sourceLabel}」与「${targetLabel}」的${relationshipLabels[edge.relationship as RelationshipType] || edge.relationship}关系已验证`,
+        improvementTips
+      })
+      
+      let successMsg = ''
+      if (strength.level === 'very_strong') {
+        successMsg = `🎉 完美推理！「${sourceLabel}」与「${targetLabel}」的关系已完全验证（置信度 ${bonusConfidence}%，强度：${strengthLabel}）`
+      } else if (strength.level === 'strong') {
+        successMsg = `✨ 出色的推理！「${sourceLabel}」与「${targetLabel}」的关系已验证（置信度 ${bonusConfidence}%，强度：${strengthLabel}）`
+      } else {
+        successMsg = `✅ 关系确认成功！「${sourceLabel}」与「${targetLabel}」的关系已验证（置信度 ${bonusConfidence}%）`
+      }
+      
+      addError(successMsg, 'warning')
+      gameStore.addLog('connection', `确认线索关联成功：${sourceLabel} ↔ ${targetLabel}，关系：${relationshipLabels[edge.relationship as RelationshipType] || edge.relationship}，强度：${strengthLabel}，最终置信度 ${bonusConfidence}%`)
       gameStore.generateDeductionHints()
       return { success: true, finalConfidence: bonusConfidence }
     } else {
-      const penaltyConfidence = Math.max(10, finalRate - 20)
-      updateEdge(edgeId, { confirmed: false, confidence: penaltyConfidence })
-      addError(`❌ 关系确认失败！「${sourceLabel}」与「${targetLabel}」的关联证据不足（置信度降至 ${penaltyConfidence}%）`, 'error')
-      gameStore.addLog('connection', `确认线索关联失败：${sourceLabel} ↔ ${targetLabel}，置信度降至 ${penaltyConfidence}%，建议补充批注、比对或可信度标记`)
-      gameStore.modifySanity(-2, '错误的线索关联判断')
+      const penaltyAmount = strength.level === 'strong' || strength.level === 'very_strong' ? 10 : 15
+      const sanityPenalty = strength.level === 'weak' || strength.level === 'moderate' ? -1 : -1
+      const penaltyConfidence = Math.max(15, finalRate - penaltyAmount)
+      
+      updateEdge(edgeId, { 
+        confirmed: false, 
+        confidence: penaltyConfidence,
+        strength: updatedStrength,
+        conflicts,
+        feedbackMessage: `🤔 此关联的证据尚不充分，建议：${improvementTips[0] || '补充更多证据'}`,
+        improvementTips
+      })
+      
+      let failureMsg = ''
+      if (conflicts.length > 0) {
+        const highConflicts = conflicts.filter(c => c.severity === 'high')
+        if (highConflicts.length > 0) {
+          failureMsg = `⚠️ 验证失败！检测到 ${highConflicts.length} 个冲突。「${sourceLabel}」与「${targetLabel}」的关联可能存在推理错误（置信度：${penaltyConfidence}%）`
+        } else {
+          failureMsg = `🔍 验证失败，存在 ${conflicts.length} 个潜在冲突。建议重新审视「${sourceLabel}」与「${targetLabel}」的关系（置信度：${penaltyConfidence}%）`
+        }
+      } else if (strength.level === 'weak') {
+        failureMsg = `💡 验证失败，但这很正常！「${sourceLabel}」与「${targetLabel}」的关联本身较弱。建议：${improvementTips[0] || '先进行线索比对'}`
+      } else {
+        failureMsg = `🤔 验证失败，证据尚不充分。「${sourceLabel}」与「${targetLabel}」的关联需要更多支持（置信度：${penaltyConfidence}%，强度：${strengthLabel}）`
+      }
+      
+      addError(failureMsg, 'warning')
+      gameStore.addLog('connection', `确认线索关联：${sourceLabel} ↔ ${targetLabel}，验证暂未通过，置信度调整为 ${penaltyConfidence}%。建议：${improvementTips.slice(0, 2).join('；')}`)
+      
+      if (sanityPenalty < 0) {
+        gameStore.modifySanity(sanityPenalty, '线索关联验证未通过')
+      }
+      
       gameStore.generateDeductionHints()
       return { success: false, finalConfidence: penaltyConfidence }
     }
@@ -972,6 +1468,8 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     connectingFrom,
     validationResult,
     errorMessages,
+    connectionPreview,
+    hoveredNodeId,
     nodes,
     edges,
     canUndo,
@@ -1011,6 +1509,14 @@ export const useClueGraphStore = defineStore('clueGraph', () => {
     exportGraph,
     importGraph,
     refreshFromGameState,
-    addError
+    addError,
+    getStrengthLevel,
+    getStrengthLabel,
+    calculateRelationshipStrength,
+    detectConflicts,
+    getConnectionPreview,
+    getImprovementTips,
+    updateHoveredNode,
+    suggestRelationshipTypes
   }
 })

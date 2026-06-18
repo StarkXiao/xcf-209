@@ -862,6 +862,42 @@ export interface GraphNode {
   metadata?: Record<string, unknown>
 }
 
+export type RelationshipStrengthLevel = 'weak' | 'moderate' | 'strong' | 'very_strong'
+
+export interface RelationshipStrength {
+  level: RelationshipStrengthLevel
+  score: number
+  factors: {
+    type: 'evidence' | 'annotation' | 'comparison' | 'confidence' | 'type_match' | 'canonical'
+    description: string
+    contribution: number
+  }[]
+}
+
+export interface ConflictInfo {
+  hasConflict: boolean
+  conflictType?: 'direct_contradiction' | 'mutual_exclusive' | 'transitive_conflict' | 'evidence_conflict'
+  conflictingEdgeId?: string
+  conflictingEdgeLabel?: string
+  description: string
+  severity: 'low' | 'medium' | 'high'
+}
+
+export interface ConnectionPreview {
+  sourceId: string
+  targetId: string
+  estimatedStrength: RelationshipStrength
+  estimatedConfidence: number
+  potentialConflicts: ConflictInfo[]
+  suggestedRelationships: {
+    type: RelationshipType
+    label: string
+    confidence: number
+  }[]
+  warnings: string[]
+  suggestions: string[]
+}
+
 export interface GraphEdge {
   id: string
   sourceId: string
@@ -873,6 +909,10 @@ export interface GraphEdge {
   errorMessage?: string
   createdAt: number
   createdBy?: string
+  strength?: RelationshipStrength
+  conflicts?: ConflictInfo[]
+  feedbackMessage?: string
+  improvementTips?: string[]
 }
 
 export interface GraphValidationResult {
@@ -893,7 +933,8 @@ export interface GraphValidationWarning {
   edgeId?: string
   nodeId?: string
   message: string
-  type: 'unconfirmed' | 'low_confidence' | 'isolated_node' | 'potential_connection'
+  type: 'unconfirmed' | 'low_confidence' | 'isolated_node' | 'potential_connection' | 'relationship_conflict' | 'weak_connection' | 'strength_increase' | 'conflict_resolved'
+  severity?: 'low' | 'medium' | 'high'
 }
 
 export interface GraphAction {
