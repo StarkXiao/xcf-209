@@ -381,7 +381,7 @@ function makeDeduction() {
   gameStore.stopTimer()
   usedTime.value = gameStore.getUsedTime()
   
-  currentSufficiency.value = validation.sufficiency
+  currentSufficiency.value = validation.sufficiency ?? null
   currentDeductionFeedback.value = validation.feedback
   
   isCorrect.value = validation.feedback.isConclusionCorrect
@@ -424,7 +424,7 @@ function makeDeduction() {
       score: caseScore.value.totalScore,
       grade: caseScore.value.grade,
       intelligenceCompleteness: intelligenceCompleteness.value,
-      evidenceSufficiency: validation.sufficiency.levelLabel,
+      evidenceSufficiency: validation.sufficiency?.levelLabel,
       feedbackLevel: validation.feedback.feedbackLevelLabel
     })
 
@@ -468,7 +468,7 @@ function makeDeduction() {
     gameStore.addLog('conclusion', `推演结果：${validation.feedback.feedbackLevelLabel} - ${caseData.value.title}`, {
       conclusion: option.text,
       sanityLost: adjustedSanityCost,
-      evidenceSufficiency: validation.sufficiency.levelLabel,
+      evidenceSufficiency: validation.sufficiency?.levelLabel,
       feedbackLevel: validation.feedback.feedbackLevelLabel,
       isCorrect: false
     })
@@ -664,7 +664,7 @@ function disproveOption(optionId: string) {
                     {{ evidenceSufficiency.levelLabel }}
                   </span>
                   <span class="sufficiency-progress">
-                    关键证据: {{ evidenceSufficiency.discoveredRequiredCount }}/{{ evidenceSufficiency.requiredEvidenceCount }}
+                    关键证据: {{ evidenceSufficiency.discoveredEvidenceCount }}/{{ evidenceSufficiency.requiredEvidenceCount }}
                   </span>
                 </div>
               </div>
@@ -1023,7 +1023,7 @@ function disproveOption(optionId: string) {
                   {{ getSufficiencyIcon(currentSufficiency.level) }} {{ currentSufficiency.levelLabel }}
                 </span>
                 <span class="evidence-count">
-                  证据: {{ currentSufficiency.discoveredRequiredCount }}/{{ currentSufficiency.requiredEvidenceCount }}
+                  证据: {{ currentSufficiency.discoveredEvidenceCount }}/{{ currentSufficiency.requiredEvidenceCount }}
                 </span>
               </div>
               <div v-if="currentDeductionFeedback" class="feedback-modifiers">
@@ -1086,17 +1086,17 @@ function disproveOption(optionId: string) {
 
             <p class="result-message">{{ resultMessage }}</p>
 
-            <div v-if="currentDeductionFeedback && currentDeductionFeedback.detailedMessages.length > 0" class="detailed-feedback-section">
+            <div v-if="currentDeductionFeedback && (currentDeductionFeedback.detailedMessages || []).length > 0" class="detailed-feedback-section">
               <h4 class="feedback-section-title">📋 详细分析</h4>
               <ul class="detailed-messages">
-                <li v-for="(msg, idx) in currentDeductionFeedback.detailedMessages" :key="idx">{{ msg }}</li>
+                <li v-for="(msg, idx) in currentDeductionFeedback.detailedMessages || []" :key="idx">{{ msg }}</li>
               </ul>
             </div>
 
-            <div v-if="currentDeductionFeedback && currentDeductionFeedback.suggestions.length > 0 && !isCorrect" class="suggestions-section">
+            <div v-if="currentDeductionFeedback && (currentDeductionFeedback.suggestions || []).length > 0 && !isCorrect" class="suggestions-section">
               <h4 class="feedback-section-title">💡 改进建议</h4>
               <ul class="suggestion-list">
-                <li v-for="(suggestion, idx) in currentDeductionFeedback.suggestions" :key="idx">{{ suggestion }}</li>
+                <li v-for="(suggestion, idx) in currentDeductionFeedback.suggestions || []" :key="idx">{{ suggestion }}</li>
               </ul>
             </div>
 

@@ -3,7 +3,7 @@ export interface Case {
   title: string
   description: string
   difficulty: 'easy' | 'normal' | 'hard'
-  status: 'locked' | 'available' | 'in_progress' | 'completed'
+  status: 'locked' | 'available' | 'in_progress' | 'completed' | 'reopened' | 'failed' | 'abandoned'
   scenes: Scene[]
   clues: Clue[]
   conclusion: Conclusion
@@ -47,6 +47,9 @@ export interface CaseProgress {
   bestGrade?: ScoreGrade
   fastestTime?: number
   playHistory: PlayRecord[]
+  lastStatus?: Case['status']
+  failedCount: number
+  abandonedCount: number
 }
 
 export interface PlayRecord {
@@ -68,12 +71,55 @@ export interface ChapterNode {
   isLocked: boolean
 }
 
+export type SceneUnlockConditionType = 
+  | 'evidence_combo' 
+  | 'clue_combo' 
+  | 'any_evidence' 
+  | 'any_clue'
+  | 'scene_visited'
+  | 'clue_analyzed'
+  | 'phase_unlocked'
+  | 'tool_owned'
+  | 'sanity_under'
+  | 'sanity_over'
+  | 'evidence_discovered_count'
+  | 'clue_discovered_count'
+  | 'clue_analyzed_count'
+  | 'deduction_branch'
+  | 'custom_event'
+
 export interface SceneUnlockCondition {
-  type: 'evidence_combo' | 'clue_combo' | 'any_evidence' | 'any_clue'
+  type: SceneUnlockConditionType
   requiredEvidenceIds?: string[]
   requiredClueIds?: string[]
+  requiredSceneIds?: string[]
+  requiredPhaseIds?: string[]
+  requiredToolIds?: string[]
+  requiredBranchIds?: string[]
+  requiredEventIds?: string[]
   requiredCount?: number
+  sanityThreshold?: number
   description?: string
+  narrativeHint?: string
+}
+
+export interface SceneLockState {
+  isLocked: boolean
+  unlockedAt?: number
+  unlockAnimationShown?: boolean
+}
+
+export interface SceneUnlockConditionProgressDetail {
+  satisfied: boolean
+  description: string
+  progressText?: string
+}
+
+export interface SceneUnlockConditionProgress {
+  total: number
+  satisfied: number
+  description: string
+  conditions: SceneUnlockConditionProgressDetail[]
 }
 
 export interface Scene {
@@ -86,6 +132,13 @@ export interface Scene {
   locked?: boolean
   unlockCondition?: string
   unlockConditions?: SceneUnlockCondition[]
+  lockIcon?: string
+  lockedDescription?: string
+  unlockNarrative?: string
+  sceneOrder?: number
+  isSecretScene?: boolean
+  unlockRewardText?: string
+  unlockBgm?: string
 }
 
 export interface Evidence {
@@ -419,6 +472,64 @@ export interface GameState {
   comparisonSelectedClues: string[]
 }
 
+export type SaveType = 'manual' | 'auto' | 'snapshot' | 'checkpoint'
+
+export type KeySnapshotTriggerType = 
+  | 'evidence_discovered' 
+  | 'clue_analyzed' 
+  | 'phase_unlocked' 
+  | 'deduction_branch'
+  | 'scene_entered'
+  | 'sanity_threshold'
+  | 'mail_read'
+  | 'document_read'
+  | 'tool_acquired'
+  | 'conclusion_reached'
+
+export interface KeySnapshotMetadata {
+  triggerType: KeySnapshotTriggerType
+  triggerDescription: string
+  relatedIds?: string[]
+  phaseId?: string
+  sceneId?: string
+  significance: 'minor' | 'moderate' | 'major' | 'critical'
+}
+
+export interface SaveCoverSummary {
+  caseTitle: string
+  caseDifficulty: string
+  progressPercentage: number
+  phaseName: string
+  currentSceneName: string
+  keyHighlights: string[]
+  moodTag: 'hopeful' | 'tense' | 'dangerous' | 'corrupted' | 'mysterious' | 'victorious'
+  sanityStatus: string
+  timeElapsed: string
+  discoveredCount: {
+    evidence: number
+    clues: number
+    connections: number
+  }
+  endingHint?: string
+}
+
+export interface CaseProgressMetric {
+  metricId: string
+  metricName: string
+  value: number
+  maxValue?: number
+  unit?: string
+  color?: string
+}
+
+export interface CrossCaseComparison {
+  caseIds: string[]
+  comparisonDate: number
+  metrics: Record<string, CaseProgressMetric[]>
+  overallRanking: { caseId: string; score: number; rank: number }[]
+  summaryNotes: string[]
+}
+
 export interface SaveData {
   id: string
   name: string
@@ -430,6 +541,12 @@ export interface SaveData {
   isNewGamePlus?: boolean
   inheritedTools?: string[]
   characterProfileId?: string
+  saveType: SaveType
+  snapshotMetadata?: KeySnapshotMetadata
+  coverSummary: SaveCoverSummary
+  playTimeSeconds: number
+  autoSaveConfig?: { intervalMinutes: number; enabled: boolean }
+  tags: string[]
 }
 
 export interface SanityEvent {
@@ -941,6 +1058,8 @@ export interface IntelligenceState {
   totalIntelligence: number
   phaseIntelligence: Record<string, number>
   sceneUnlockProgress: Record<string, number>
+  sceneLockStates: Record<string, SceneLockState>
+  unlockedSceneHistory: Array<{ sceneId: string; unlockedAt: number; unlockedBy: string }>
   deductionInfoCompleteness: number
   mailNotifications: string[]
   documentNotifications: string[]
@@ -978,6 +1097,7 @@ export type PollutionSource =
   | 'dark_knowledge'
   | 'save_ritual'
   | 'ending_choice'
+  | 'sanity_recovery'
 
 export interface PollutionEvent {
   id: string
@@ -1339,4 +1459,131 @@ export interface ReplayStats {
   keyMomentCount: number
   phaseCount: number
   toolsUsed: string[]
+}
+
+export type SanityRecoveryOptionCostType = 
+  | 'time' 
+  | 'evidence_penalty' 
+  | 'pollution_erosion' 
+  | 'tool_durability' 
+  | 'anomaly_risk' 
+  | 'clue_analysis_penalty'
+
+export interface SanityRecoveryOptionCost {
+  type: SanityRecoveryOptionCostType
+  value: number
+  description: string
+}
+
+export interface SanityRecoveryOption {
+  id: string
+  text: string
+  sanityRecovery: number
+  costs: SanityRecoveryOptionCost[]
+  flavorText?: string
+}
+
+export type SanityRecoveryTriggerContext = 
+  | 'scene_enter' 
+  | 'after_search' 
+  | 'low_sanity' 
+  | 'random'
+
+export interface SanityRecoveryEvent {
+  id: string
+  name: string
+  description: string
+  triggerContext: SanityRecoveryTriggerContext
+  maximumSanityThreshold?: number
+  minimumSanityThreshold?: number
+  options: SanityRecoveryOption[]
+}
+
+export interface TempStatusEffect {
+  value: number
+  remainingSeconds?: number
+  remainingSearches?: number
+}
+
+export interface DeductionFeedback {
+  isConclusionCorrect: boolean
+  mainMessage: string
+  sanityCostModifier: number
+  scoreModifier: number
+  detailMessages?: string[]
+  feedbackLevel?: 'correct' | 'wrong' | 'uncertain'
+  feedbackLevelLabel?: string
+  detailedMessages?: string[]
+  suggestions?: string[]
+}
+
+export interface DeductionValidationResult {
+  isValid: boolean
+  blockingReason?: string
+  sufficiency?: EvidenceSufficiencyResult
+  feedback?: DeductionFeedback
+}
+
+export type EvidenceSufficiencyLevel = 
+  | 'overwhelming' 
+  | 'sufficient' 
+  | 'moderate' 
+  | 'weak' 
+  | 'insufficient'
+
+export interface EvidenceSufficiencyResult {
+  level: EvidenceSufficiencyLevel
+  canAttemptDeduction: boolean
+  scoreMultiplier: number
+  description: string
+  requiredEvidenceCount: number
+  discoveredEvidenceCount: number
+  warnings: string[]
+  recommendedActions: string[]
+  scorePenalty: number
+  sanityRiskMultiplier: number
+  levelLabel: string
+}
+
+export type EvidenceSufficiencyCheck = EvidenceSufficiencyResult
+
+export type LogType = 
+  | 'discovery' 
+  | 'analysis' 
+  | 'analysis_start' 
+  | 'analysis_complete' 
+  | 'connection' 
+  | 'sanity_loss' 
+  | 'conclusion' 
+  | 'tool_use' 
+  | 'tool_repair' 
+  | 'tool_break' 
+  | 'timer' 
+  | 'scene_switch' 
+  | 'timeout' 
+  | 'penalty' 
+  | 'bonus' 
+  | 'evidence_refresh' 
+  | 'material_drop' 
+  | 'crafting' 
+  | 'recipe_unlock'
+
+export interface LogFilterState {
+  types: LogType[]
+  phaseIds: string[]
+  searchQuery: string
+  timeStart: number | null
+  timeEnd: number | null
+}
+
+export interface LogNavigationState {
+  focusedLogId: string | null
+  currentIndex: number
+}
+
+declare module './index' {
+  interface GameState {
+    activeSanityRecoveryEvent: SanityRecoveryEvent | null
+    sanityRecoveryEventCooldown: number
+  }
 }

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType } from '@/types'
+import type { GameState, GameLogEntry, ClueConnection, Tool, HitRateResult, SearchResult, Evidence, SceneEvent, CaseScoreBreakdown, ScoreGrade, CaseScoreConfig, AnomalyEvent, HallucinationEffect, MisleadingClue, DeductionCandidateChange, Mail, Document, MailReplyOption, PollutionEvent, PollutionSource, EndingDescriptor, ClueAnnotation, ClueConfidence, ClueComparison, DeductionHint, AnnotationType, TempStatusEffect, DeductionValidationResult, EvidenceSufficiencyResult, LogFilterState, LogNavigationState, LogType, DeductionFeedback, SceneUnlockConditionProgress } from '@/types'
 import { getCaseById, setCaseStatus } from '@/data/cases'
 import { createToolInstance, getToolEffectiveness, getDurabilityPenalty, getSanityPenalty, defaultStartingTools } from '@/data/tools'
 import { useSaveStore } from './save'
@@ -9,6 +9,7 @@ import { useInventoryStore } from './inventory'
 import { useBestiaryStore } from './bestiary'
 import { useNewGamePlusStore } from './newGamePlus'
 import { getEventsForTrigger, checkEventTrigger, resetEvents } from '@/data/events'
+import { pickRandomSanityRecoveryEvent } from '@/data/sanityRecovery'
 import { 
   getAvailableAnomalyEvents, 
   checkAnomalyTrigger, 
@@ -124,7 +125,57 @@ export const useGameStore = defineStore('game', () => {
     clueComparisons: [],
     deductionHints: [],
     comparisonMode: false,
-    comparisonSelectedClues: []
+    comparisonSelectedClues: [],
+    activeSanityRecoveryEvent: null,
+    sanityRecoveryEventCooldown: 0
+  })
+
+  const tempEvidencePenalty = ref<TempStatusEffect | null>(null)
+  const tempAnomalyRiskBonus = ref<TempStatusEffect | null>(null)
+  const tempClueAnalysisPenalty = ref<TempStatusEffect | null>(null)
+
+  const logFilter = ref<LogFilterState>({
+    types: [],
+    phaseIds: [],
+    searchQuery: '',
+    timeStart: null,
+    timeEnd: null
+  })
+
+  const logNavigation = ref<LogNavigationState>({
+    focusedLogId: null,
+    currentIndex: -1
+  })
+
+  const filteredGameLog = computed(() => {
+    let logs = [...gameState.value.gameLog]
+
+    if (logFilter.value.types.length > 0) {
+      logs = logs.filter(l => logFilter.value.types.includes(l.type as LogType))
+    }
+
+    if (logFilter.value.phaseIds.length > 0) {
+      logs = logs.filter(l => {
+        const phaseId = (l.details as any)?.phaseId
+        if (!phaseId && logFilter.value.phaseIds.includes('__no_phase__')) return true
+        return phaseId && logFilter.value.phaseIds.includes(phaseId)
+      })
+    }
+
+    if (logFilter.value.searchQuery) {
+      const q = logFilter.value.searchQuery.toLowerCase()
+      logs = logs.filter(l => l.description.toLowerCase().includes(q))
+    }
+
+    if (logFilter.value.timeStart) {
+      logs = logs.filter(l => l.timestamp >= logFilter.value.timeStart!)
+    }
+
+    if (logFilter.value.timeEnd) {
+      logs = logs.filter(l => l.timestamp <= logFilter.value.timeEnd!)
+    }
+
+    return logs
   })
 
   const currentCase = computed(() => {
@@ -282,7 +333,24 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: []
+      comparisonSelectedClues: [],
+      activeSanityRecoveryEvent: null,
+      sanityRecoveryEventCooldown: 0
+    }
+
+    tempEvidencePenalty.value = null
+    tempAnomalyRiskBonus.value = null
+    tempClueAnalysisPenalty.value = null
+    logFilter.value = {
+      types: [],
+      phaseIds: [],
+      searchQuery: '',
+      timeStart: null,
+      timeEnd: null
+    }
+    logNavigation.value = {
+      focusedLogId: null,
+      currentIndex: -1
     }
 
     startTimer()
@@ -1592,6 +1660,12 @@ export const useGameStore = defineStore('game', () => {
     return getPhasesForCase(gameState.value.currentCase)
   })
 
+  const phaseOptions = computed(() => allPhases.value.map(p => ({
+    id: p.id,
+    number: p.phaseNumber,
+    name: p.name
+  })))
+
   const nextPhase = computed(() => {
     if (!currentPhase.value) return null
     return allPhases.value.find(p => p.phaseNumber === currentPhase.value!.phaseNumber + 1) || null
@@ -2137,11 +2211,7 @@ export const useGameStore = defineStore('game', () => {
     return requiredIds.every(id => gameState.value.discoveredClues.includes(id))
   }
 
-  function getSceneUnlockConditionProgress(sceneId: string): {
-    total: number
-    satisfied: number
-    description: string
-  } | null {
+  function getSceneUnlockConditionProgress(sceneId: string): SceneUnlockConditionProgress | null {
     if (!currentCase.value) return null
     const scene = currentCase.value.scenes.find(s => s.id === sceneId)
     if (!scene || !scene.unlockConditions || scene.unlockConditions.length === 0) return null
@@ -2149,6 +2219,7 @@ export const useGameStore = defineStore('game', () => {
     let total = 0
     let satisfied = 0
     const descriptions: string[] = []
+    const conditions: { satisfied: boolean; description: string; progressText?: string }[] = []
 
     for (const condition of scene.unlockConditions) {
       if (condition.type === 'evidence_combo' && condition.requiredEvidenceIds) {
@@ -2158,6 +2229,11 @@ export const useGameStore = defineStore('game', () => {
         ).length
         satisfied += satisfiedCount
         if (condition.description) descriptions.push(condition.description)
+        conditions.push({
+          satisfied: satisfiedCount === condition.requiredEvidenceIds.length,
+          description: condition.description || `收集指定证据（${satisfiedCount}/${condition.requiredEvidenceIds.length}）`,
+          progressText: `${satisfiedCount}/${condition.requiredEvidenceIds.length}`
+        })
       } else if (condition.type === 'clue_combo' && condition.requiredClueIds) {
         total += condition.requiredClueIds.length
         const satisfiedCount = condition.requiredClueIds.filter(
@@ -2165,6 +2241,11 @@ export const useGameStore = defineStore('game', () => {
         ).length
         satisfied += satisfiedCount
         if (condition.description) descriptions.push(condition.description)
+        conditions.push({
+          satisfied: satisfiedCount === condition.requiredClueIds.length,
+          description: condition.description || `发现指定线索（${satisfiedCount}/${condition.requiredClueIds.length}）`,
+          progressText: `${satisfiedCount}/${condition.requiredClueIds.length}`
+        })
       } else if (condition.type === 'any_evidence' && condition.requiredEvidenceIds && condition.requiredCount) {
         total += condition.requiredCount
         const satisfiedCount = Math.min(
@@ -2173,6 +2254,11 @@ export const useGameStore = defineStore('game', () => {
         )
         satisfied += satisfiedCount
         if (condition.description) descriptions.push(condition.description)
+        conditions.push({
+          satisfied: satisfiedCount >= condition.requiredCount,
+          description: condition.description || `收集任意证据（${satisfiedCount}/${condition.requiredCount}）`,
+          progressText: `${satisfiedCount}/${condition.requiredCount}`
+        })
       } else if (condition.type === 'any_clue' && condition.requiredClueIds && condition.requiredCount) {
         total += condition.requiredCount
         const satisfiedCount = Math.min(
@@ -2181,13 +2267,19 @@ export const useGameStore = defineStore('game', () => {
         )
         satisfied += satisfiedCount
         if (condition.description) descriptions.push(condition.description)
+        conditions.push({
+          satisfied: satisfiedCount >= condition.requiredCount,
+          description: condition.description || `发现任意线索（${satisfiedCount}/${condition.requiredCount}）`,
+          progressText: `${satisfiedCount}/${condition.requiredCount}`
+        })
       }
     }
 
     return {
       total,
       satisfied,
-      description: descriptions.join('、') || '收集更多证据以解锁'
+      description: descriptions.join('、') || '收集更多证据以解锁',
+      conditions
     }
   }
 
@@ -2274,6 +2366,49 @@ export const useGameStore = defineStore('game', () => {
     return currentCase.value.scenes.filter(s => isSceneUnlocked(s.id))
   }
 
+  function unlockScene(sceneId: string, unlockedBy: string = 'conditions_met') {
+    if (!currentCase.value) return
+    const scene = currentCase.value.scenes.find(s => s.id === sceneId)
+    if (!scene) return
+
+    gameState.value.intelligenceState.sceneUnlockProgress[sceneId] = 100
+    gameState.value.intelligenceState.sceneLockStates[sceneId] = {
+      isLocked: false,
+      unlockedAt: Date.now(),
+      unlockAnimationShown: false
+    }
+    gameState.value.intelligenceState.unlockedSceneHistory.push({
+      sceneId,
+      unlockedAt: Date.now(),
+      unlockedBy
+    })
+
+    if (scene.unlockNarrative) {
+      addLog('discovery', `📖 ${scene.unlockNarrative}`)
+    }
+    addLog('discovery', scene.isSecretScene ? `🔮 发现秘密场景：${scene.name}` : `🔓 解锁新场景：${scene.name}`)
+    
+    if (scene.unlockRewardText) {
+      addLog('bonus', `✨ ${scene.unlockRewardText}`)
+    }
+  }
+
+  function getSceneLockState(sceneId: string) {
+    return gameState.value.intelligenceState.sceneLockStates[sceneId] || null
+  }
+
+  function markSceneUnlockAnimationShown(sceneId: string) {
+    const state = gameState.value.intelligenceState.sceneLockStates[sceneId]
+    if (state) {
+      state.unlockAnimationShown = true
+    }
+  }
+
+  function getUnlockedSceneCount(): number {
+    if (!currentCase.value) return 0
+    return currentCase.value.scenes.filter(s => isSceneUnlocked(s.id)).length
+  }
+
   function resetGame() {
     stopTimer()
     resetEvents()
@@ -2329,8 +2464,318 @@ export const useGameStore = defineStore('game', () => {
       clueComparisons: [],
       deductionHints: [],
       comparisonMode: false,
-      comparisonSelectedClues: []
+      comparisonSelectedClues: [],
+      activeSanityRecoveryEvent: null,
+      sanityRecoveryEventCooldown: 0
     }
+
+    tempEvidencePenalty.value = null
+    tempAnomalyRiskBonus.value = null
+    tempClueAnalysisPenalty.value = null
+    logFilter.value = {
+      types: [],
+      phaseIds: [],
+      searchQuery: '',
+      timeStart: null,
+      timeEnd: null
+    }
+    logNavigation.value = {
+      focusedLogId: null,
+      currentIndex: -1
+    }
+  }
+
+  function setLogFilterType(type: LogType) {
+    const idx = logFilter.value.types.indexOf(type)
+    if (idx >= 0) {
+      logFilter.value.types.splice(idx, 1)
+    } else {
+      logFilter.value.types.push(type)
+    }
+  }
+
+  function setLogFilterPhase(phaseId: string) {
+    const idx = logFilter.value.phaseIds.indexOf(phaseId)
+    if (idx >= 0) {
+      logFilter.value.phaseIds.splice(idx, 1)
+    } else {
+      logFilter.value.phaseIds.push(phaseId)
+    }
+  }
+
+  function setLogFilterTimeRange(start: number | null, end: number | null) {
+    logFilter.value.timeStart = start
+    logFilter.value.timeEnd = end
+  }
+
+  function setLogSearchQuery(query: string) {
+    logFilter.value.searchQuery = query
+  }
+
+  function clearLogFilter() {
+    logFilter.value = {
+      types: [],
+      phaseIds: [],
+      searchQuery: '',
+      timeStart: null,
+      timeEnd: null
+    }
+  }
+
+  function navigateToLog(logId: string) {
+    const idx = filteredGameLog.value.findIndex(l => l.id === logId)
+    if (idx >= 0) {
+      logNavigation.value.focusedLogId = logId
+      logNavigation.value.currentIndex = idx
+    }
+  }
+
+  function navigateLogFirst() {
+    if (filteredGameLog.value.length > 0) {
+      navigateToLog(filteredGameLog.value[0].id)
+    }
+  }
+
+  function navigateLogLast() {
+    if (filteredGameLog.value.length > 0) {
+      navigateToLog(filteredGameLog.value[filteredGameLog.value.length - 1].id)
+    }
+  }
+
+  function navigateLogPrev() {
+    if (logNavigation.value.currentIndex > 0) {
+      navigateToLog(filteredGameLog.value[logNavigation.value.currentIndex - 1].id)
+    }
+  }
+
+  function navigateLogNext() {
+    if (logNavigation.value.currentIndex < filteredGameLog.value.length - 1) {
+      navigateToLog(filteredGameLog.value[logNavigation.value.currentIndex + 1].id)
+    }
+  }
+
+  function checkEvidenceSufficiency(): EvidenceSufficiencyResult {
+    if (!currentCase.value) {
+      return { level: 'insufficient', canAttemptDeduction: false, scoreMultiplier: 0, description: '未选择案件', requiredEvidenceCount: 0, discoveredEvidenceCount: 0, warnings: [], recommendedActions: [], scorePenalty: 0, sanityRiskMultiplier: 1, levelLabel: '证据不足' }
+    }
+
+    const requiredEvidence = currentCase.value.conclusion.evidence
+    const discovered = gameState.value.discoveredEvidence
+    const found = requiredEvidence.filter(e => discovered.includes(e)).length
+    const total = requiredEvidence.length
+    const ratio = total > 0 ? found / total : 0
+
+    const clueRatio = gameState.value.analyzedClues.length > 0
+      ? gameState.value.analyzedClues.length / Math.max(1, gameState.value.discoveredClues.length)
+      : 0
+
+    const connectionRatio = gameState.value.clueConnections.length > 0
+      ? Math.min(1, gameState.value.clueConnections.length / 5)
+      : 0
+
+    const overallScore = (ratio * 0.5) + (clueRatio * 0.3) + (connectionRatio * 0.2)
+
+    const warnings: string[] = []
+    const recommendedActions: string[] = []
+    
+    if (ratio < 0.7) {
+      warnings.push(`关键证据收集不足（${found}/${total}）`)
+      recommendedActions.push('继续搜索场景，收集更多关键证据')
+    }
+    if (clueRatio < 0.5 && gameState.value.discoveredClues.length > 0) {
+      warnings.push(`线索分析进度不足`)
+      recommendedActions.push('分析已发现的线索以获取更多信息')
+    }
+    if (connectionRatio < 0.4) {
+      warnings.push('线索关联不足')
+      recommendedActions.push('尝试建立更多线索之间的关联')
+    }
+
+    const scorePenalty = Math.round((1 - overallScore) * 30)
+    const sanityRiskMultiplier = 1 + (1 - overallScore) * 0.5
+
+    if (overallScore >= 0.9) {
+      return { level: 'overwhelming', canAttemptDeduction: true, scoreMultiplier: 1.3, description: '证据确凿，推演成功率极高', requiredEvidenceCount: total, discoveredEvidenceCount: found, warnings, recommendedActions: ['可以放心进行推演'], scorePenalty: 0, sanityRiskMultiplier: 1, levelLabel: '证据确凿' }
+    } else if (overallScore >= 0.7) {
+      return { level: 'sufficient', canAttemptDeduction: true, scoreMultiplier: 1.0, description: '证据充分，可以进行推演', requiredEvidenceCount: total, discoveredEvidenceCount: found, warnings, recommendedActions, scorePenalty, sanityRiskMultiplier, levelLabel: '证据充分' }
+    } else if (overallScore >= 0.5) {
+      return { level: 'moderate', canAttemptDeduction: true, scoreMultiplier: 0.85, description: '证据基本充足，存在一定风险', requiredEvidenceCount: total, discoveredEvidenceCount: found, warnings, recommendedActions, scorePenalty, sanityRiskMultiplier, levelLabel: '证据基本充足' }
+    } else if (overallScore >= 0.3) {
+      return { level: 'weak', canAttemptDeduction: false, scoreMultiplier: 0.6, description: '证据较为薄弱，建议继续调查', requiredEvidenceCount: total, discoveredEvidenceCount: found, warnings, recommendedActions, scorePenalty, sanityRiskMultiplier, levelLabel: '证据薄弱' }
+    } else {
+      return { level: 'insufficient', canAttemptDeduction: false, scoreMultiplier: 0.3, description: '证据严重不足，无法进行推演', requiredEvidenceCount: total, discoveredEvidenceCount: found, warnings, recommendedActions, scorePenalty, sanityRiskMultiplier, levelLabel: '证据严重不足' }
+    }
+  }
+
+  function validateDeduction(conclusionOptionId: string): DeductionValidationResult {
+    if (!currentCase.value) {
+      return { isValid: false, blockingReason: '未选择案件' }
+    }
+
+    const option = currentCase.value.conclusion.options.find(o => o.id === conclusionOptionId)
+    if (!option) {
+      return { isValid: false, blockingReason: '无效的推演选项' }
+    }
+
+    if (option.requiredTools && option.requiredTools.length > 0) {
+      const hasAllTools = option.requiredTools.every(tid => 
+        gameState.value.tools.some(t => t.id === tid && t.durability > 0)
+      )
+      if (!hasAllTools) {
+        return { isValid: false, blockingReason: '缺少进行推演所需的关键工具' }
+      }
+    }
+
+    if (option.requiredEvidence && option.requiredEvidence.length > 0) {
+      const hasAllEvidence = option.requiredEvidence.every(eid => 
+        gameState.value.discoveredEvidence.includes(eid)
+      )
+      if (!hasAllEvidence) {
+        return { isValid: false, blockingReason: '缺少该结论所需的关键证据' }
+      }
+    }
+
+    const sufficiency = checkEvidenceSufficiency()
+    if (!sufficiency.canAttemptDeduction) {
+      return { isValid: false, blockingReason: sufficiency.description, sufficiency }
+    }
+
+    if (option.isNgPlusExclusive) {
+      const ngStore = useNewGamePlusStore()
+      if (!ngStore.state.isNewGamePlus) {
+        return { isValid: false, blockingReason: '该结局仅在二周目及以上可解锁' }
+      }
+    }
+
+    const isCorrect = option.isCorrect
+    const feedback: DeductionFeedback = {
+      isConclusionCorrect: isCorrect,
+      mainMessage: isCorrect ? option.feedback : '你的推理存在漏洞...',
+      sanityCostModifier: isCorrect ? 0.7 : 1.3,
+      scoreModifier: isCorrect ? Math.round(sufficiency.scoreMultiplier * 50) : -30,
+      detailMessages: isCorrect ? ['推理过程无懈可击！'] : ['需要重新审视证据链'],
+      feedbackLevel: isCorrect ? 'correct' : 'wrong',
+      feedbackLevelLabel: isCorrect ? '推演正确' : '推演失败',
+      detailedMessages: isCorrect ? ['推理过程无懈可击！'] : ['需要重新审视证据链'],
+      suggestions: isCorrect ? [] : ['检查遗漏的证据', '重新分析已有的线索', '尝试建立更多线索关联']
+    }
+
+    return {
+      isValid: true,
+      sufficiency,
+      feedback
+    }
+  }
+
+  function applyTempEffect(
+    effectType: 'evidence' | 'anomaly' | 'clue_analysis',
+    value: number,
+    duration: { type: 'seconds' | 'searches'; amount: number }
+  ) {
+    const effect: TempStatusEffect = { value }
+    if (duration.type === 'seconds') {
+      effect.remainingSeconds = duration.amount
+    } else {
+      effect.remainingSearches = duration.amount
+    }
+
+    if (effectType === 'evidence') {
+      tempEvidencePenalty.value = effect
+    } else if (effectType === 'anomaly') {
+      tempAnomalyRiskBonus.value = effect
+    } else {
+      tempClueAnalysisPenalty.value = effect
+    }
+  }
+
+  function decrementSearchEffects() {
+    if (tempEvidencePenalty.value?.remainingSearches !== undefined) {
+      tempEvidencePenalty.value.remainingSearches--
+      if (tempEvidencePenalty.value.remainingSearches <= 0) {
+        tempEvidencePenalty.value = null
+      }
+    }
+  }
+
+  function tickTempEffects(deltaSeconds: number) {
+    const tickIt = (eff: TempStatusEffect | null) => {
+      if (eff?.remainingSeconds !== undefined) {
+        eff.remainingSeconds -= deltaSeconds
+        if (eff.remainingSeconds <= 0) return null
+      }
+      return eff
+    }
+    tempAnomalyRiskBonus.value = tickIt(tempAnomalyRiskBonus.value)
+    tempClueAnalysisPenalty.value = tickIt(tempClueAnalysisPenalty.value)
+  }
+
+  function tryTriggerSanityRecovery(context: 'scene_enter' | 'after_search' | 'low_sanity' | 'random') {
+    if (gameState.value.sanityRecoveryEventCooldown > 0) {
+      gameState.value.sanityRecoveryEventCooldown = Math.max(0, gameState.value.sanityRecoveryEventCooldown - 1)
+      return
+    }
+    if (gameState.value.activeSanityRecoveryEvent) return
+
+    const event = pickRandomSanityRecoveryEvent(
+      context,
+      gameState.value.sanity,
+      gameState.value.maxSanity,
+      context === 'low_sanity' ? 100 : (context === 'random' ? 15 : 35)
+    )
+    if (event) {
+      gameState.value.activeSanityRecoveryEvent = event
+    }
+  }
+
+  function resolveSanityRecoveryOption(optionId: string) {
+    const event = gameState.value.activeSanityRecoveryEvent
+    if (!event) return
+
+    const option = event.options.find(o => o.id === optionId)
+    if (!option) return
+
+    const bonus = talentEffects.value.sanityRecoveryBonus || 0
+    const effectiveRecovery = Math.round(option.sanityRecovery * (1 + bonus / 100))
+    if (effectiveRecovery > 0) {
+      modifySanity(effectiveRecovery, '理智恢复')
+    }
+
+    for (const cost of option.costs) {
+      switch (cost.type) {
+        case 'time':
+          consumeTime(cost.value, '理智恢复消耗')
+          break
+        case 'evidence_penalty':
+          applyTempEffect('evidence', cost.value, { type: 'searches', amount: 3 })
+          break
+        case 'pollution_erosion':
+          addPollution(0, cost.value, 'sanity_recovery', '理智恢复代价：精神侵蚀')
+          break
+        case 'tool_durability':
+          for (const tool of gameState.value.tools) {
+            tool.durability = Math.max(0, tool.durability - cost.value)
+          }
+          break
+        case 'anomaly_risk':
+          applyTempEffect('anomaly', cost.value, { type: 'seconds', amount: 30 })
+          break
+        case 'clue_analysis_penalty':
+          applyTempEffect('clue_analysis', cost.value, { type: 'seconds', amount: 60 })
+          break
+      }
+    }
+
+    if (option.flavorText) {
+      addLog('bonus', `💭 ${option.flavorText}`)
+    }
+
+    gameState.value.activeSanityRecoveryEvent = null
+    gameState.value.sanityRecoveryEventCooldown = 5
+  }
+
+  function skipSanityRecoveryEvent() {
+    gameState.value.activeSanityRecoveryEvent = null
+    gameState.value.sanityRecoveryEventCooldown = 3
   }
 
   function generateAnalysisId(): string {
@@ -2773,6 +3218,35 @@ export const useGameStore = defineStore('game', () => {
     getConnectionSuccessRate,
     generateDeductionHints,
     getDeductionHints,
-    dismissDeductionHint
+    dismissDeductionHint,
+    validateDeduction,
+    checkEvidenceSufficiency,
+    tempEvidencePenalty,
+    tempAnomalyRiskBonus,
+    tempClueAnalysisPenalty,
+    applyTempEffect,
+    decrementSearchEffects,
+    tickTempEffects,
+    tryTriggerSanityRecovery,
+    resolveSanityRecoveryOption,
+    skipSanityRecoveryEvent,
+    logFilter,
+    logNavigation,
+    phaseOptions,
+    filteredGameLog,
+    setLogFilterType,
+    setLogFilterPhase,
+    setLogFilterTimeRange,
+    setLogSearchQuery,
+    clearLogFilter,
+    navigateToLog,
+    navigateLogFirst,
+    navigateLogLast,
+    navigateLogPrev,
+    navigateLogNext,
+    unlockScene,
+    getSceneLockState,
+    markSceneUnlockAnimationShown,
+    getUnlockedSceneCount
   }
 })
